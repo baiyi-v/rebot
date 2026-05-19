@@ -1000,7 +1000,11 @@ export function mountRoutes(app, services) {
         return res.status(400).json({ error: 'batch_expired', message: '搜索结果已过期，请重新搜索' })
       }
 
-      consumeJobCredit(req.user.id)
+      const deducted = consumeJobCredit(req.user.id)
+      if (!deducted) {
+        console.error('[sotxt8] 扣减下载次数失败: user=%s userId=%s', req.user.username, req.user.id)
+        return res.status(403).json({ error: 'no_downloads', message: '下载次数已用完，请使用卡密充值' })
+      }
 
       LOG(`代理下载(扣次数): user=${req.user.username}, targetUrl=${targetUrl}`)
 
