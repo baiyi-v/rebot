@@ -15,6 +15,8 @@ const {
   activeTab,
   showConfirm,
   confirmItem,
+  downloading,
+  downloadError,
   search,
   openConfirm,
   cancelDownload,
@@ -141,9 +143,13 @@ function statusIcon(slug) {
           <div class="confirm-dialog__name">{{ confirmItem?.fileName }}</div>
           <div v-if="confirmItem?.fileSizeText" class="confirm-dialog__size">文件大小: {{ confirmItem.fileSizeText }}</div>
           <div class="confirm-dialog__hint">下载将消耗 1 次下载次数</div>
+          <div v-if="downloadError" class="confirm-dialog__error">{{ downloadError }}</div>
           <div class="confirm-dialog__actions">
             <button class="btn" @click="cancelDownload">取消</button>
-            <button class="btn btn--primary" @click="doDownload">确认下载（-1次）</button>
+            <button class="btn btn--primary" :disabled="downloading" @click="doDownload">
+              <span v-if="downloading" class="spinner"></span>
+              <span v-else>确认下载（-1次）</span>
+            </button>
           </div>
         </div>
       </div>
@@ -500,6 +506,15 @@ function statusIcon(slug) {
   margin-top: 12px;
   padding: 8px 12px;
   background: rgba(251, 191, 36, 0.1);
+  border-radius: 6px;
+}
+
+.confirm-dialog__error {
+  font-size: 13px;
+  color: #fecaca;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.15);
   border-radius: 6px;
 }
 

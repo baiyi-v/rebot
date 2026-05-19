@@ -11,6 +11,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
 import { performQuarkAuth, getQuarkAuthState } from './sotxt8_quark_auth.mjs'
+import { q, dbNow } from '../db.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ENV_PATH = path.resolve(__dirname, '..', '..', '.env')
@@ -667,8 +668,21 @@ function buildItems(files, urls, tokens) {
   })
 }
 
-// ---- 下载 URL 服务端存储（不暴露给前端） ----
-const downloadUrlStore = new Map()
+// ---- 下载 URL 持久化存储（SQLite，服务重启不丢失） ----
+function persistDownloadUrls(batchId, results, urls, tokens) {
+  const now = dbNow()
+  q.cleanExpiredDownloadUrls.run(now - 3600000)
+  const insert = q.insertDownloadUrl
+  for (let i = 0; i < results.length; i++) {
+    const url = buildDownloadUrl(results[i], i, urls, tokens)
+    if (url) insert.run(batchId, i, url, now)
+  }
+}
+
+function getDownloadUrlFromStore(batchId, dlIndex) {
+  const row = q.getDownloadUrl.get(batchId, dlIndex)
+  return row?.url || null
+}
 
 // ---- 分库搜索 API ----
 export async function searchSource(userId, keyword, source) {
@@ -708,11 +722,7 @@ export async function searchSource(userId, keyword, source) {
 
   const items = buildItems(results, urls, tokens)
 
-  const urlMap = new Map()
-  items.forEach((_, i) => {
-    urlMap.set(i, buildDownloadUrl(results[i], i, urls, tokens))
-  })
-  downloadUrlStore.set(batch.batchId, urlMap)
+  persistDownloadUrls(batch.batchId, results, urls, tokens)
 
   LOG(`搜索完成 ${source}: 共 ${items.length} 个结果`)
   return { source, items, total: items.length, batchId: batch.batchId }
@@ -925,7 +935,7 @@ function setCachedResult(userId, source, keyword, data) {
 
 // ---- 挂载路由 ----
 export function mountRoutes(app, services) {
-  const { requireUser, requireJobQuota, consumeJobCredit, refundJobCredit, getLocalLibraryRoot } = services
+  const { requireUser, requireJobQuota, consumeJobCredit, getLocalLibraryRoot } = services
 
   app.post('/api/txtsearch/search/:source', requireUser, async (req, res) => {
     try {
@@ -996,8 +1006,7 @@ export function mountRoutes(app, services) {
         return res.status(403).json({ error: 'bad_token', message: '下载凭证无效' })
       }
 
-      const urlMap = downloadUrlStore.get(batchId)
-      const targetUrl = urlMap?.get(dlIndex)
+      const targetUrl = getDownloadUrlFromStore(batchId, dlIndex)
       if (!targetUrl) {
         return res.status(400).json({ error: 'batch_expired', message: '搜索结果已过期，请重新搜索' })
       }
@@ -1027,8 +1036,6 @@ export function mountRoutes(app, services) {
       if (!resp.ok) {
         const text = await resp.text().catch(() => '')
         LOG(`代理下载失败:`, text)
-        refundJobCredit(req.user.id)
-        LOG(`已退还下载次数: user=${req.user.username}`)
         return res.status(502).json({ error: 'download_failed', message: `上游返回 HTTP ${resp.status}` })
       }
 
@@ -1056,8 +1063,6 @@ export function mountRoutes(app, services) {
       res.end(buf)
     } catch (e) {
       LOG(`代理下载异常: ${e.message}`)
-      refundJobCredit(req.user.id)
-      LOG(`已退还下载次数(异常): user=${req.user.username}`)
       if (!res.headersSent) {
         const errMsg = e.message || '下载失败'
         const userMsg = /fetch|network|timeout|abort|econn|enotfound|dns|socket/i.test(errMsg)
@@ -1081,12 +1086,9 @@ export function mountRoutes(app, services) {
       return res.status(400).json({ error: 'bad_params', message: '缺少 batchId 或 dlIndex' })
     }
 
-    const urlMap = downloadUrlStore.get(batchId)
-    if (!urlMap) {
+    const targetUrl = getDownloadUrlFromStore(batchId, dlIndex)
+    if (!targetUrl) {
       return res.status(400).json({ error: 'batch_expired', message: '搜索结果已过期，请重新搜索' })
-    }
-    if (!urlMap.has(dlIndex)) {
-      return res.status(400).json({ error: 'bad_index', message: '无效的下载序号' })
     }
 
     const token = `${req.user.id}::${batchId}::${dlIndex}`

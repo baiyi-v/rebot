@@ -39,7 +39,7 @@ import {
 } from './local-library.mjs'
 import './db.mjs'
 import { mountAuthRoutes, requireJobQuota, requireUser, authDisabled } from './auth-api.mjs'
-import { consumeJobCredit, refundJobCredit } from './auth-core.mjs'
+import { consumeJobCredit } from './auth-core.mjs'
 import { q, dbNow } from './db.mjs'
 import { mountRoutes as mountSotxt8 } from './platforms/sotxt8.mjs'
 
@@ -712,7 +712,7 @@ app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
 
 mountAuthRoutes(app)
-mountSotxt8(app, { requireUser, requireJobQuota, consumeJobCredit, refundJobCredit, getLocalLibraryRoot })
+mountSotxt8(app, { requireUser, requireJobQuota, consumeJobCredit, getLocalLibraryRoot })
 
 async function buildDownloadResources(req, bookId, title = '', jobId = '') {
   const lr = getLocalLibraryRoot()

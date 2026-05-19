@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS user_job_records (
 
 CREATE INDEX IF NOT EXISTS idx_user_job_records_account_created ON user_job_records(account, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_job_records_book_id ON user_job_records(book_id);
+
+CREATE TABLE IF NOT EXISTS download_urls (
+  batch_id TEXT NOT NULL,
+  dl_index INTEGER NOT NULL,
+  url TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (batch_id, dl_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_download_urls_batch_id ON download_urls(batch_id);
+CREATE INDEX IF NOT EXISTS idx_download_urls_created_at ON download_urls(created_at);
 `)
 
 const userJobColumns = db.prepare(`PRAGMA table_info(user_jobs)`).all()
@@ -289,6 +300,20 @@ export const q = {
   deleteUserJob: db.prepare(`DELETE FROM user_jobs WHERE job_id = ?`),
   deleteUserJobForUser: db.prepare(`DELETE FROM user_jobs WHERE user_id = ? AND job_id = ?`),
   deleteUserJobRecord: db.prepare(`DELETE FROM user_job_records WHERE account = ? AND job_id = ?`),
+  insertDownloadUrl: db.prepare(`
+    INSERT OR REPLACE INTO download_urls (batch_id, dl_index, url, created_at)
+    VALUES (?, ?, ?, ?)
+  `),
+  getDownloadUrl: db.prepare(`
+    SELECT url FROM download_urls WHERE batch_id = ? AND dl_index = ?
+  `),
+  getDownloadUrlBatch: db.prepare(`
+    SELECT dl_index, url FROM download_urls WHERE batch_id = ?
+  `),
+  deleteDownloadUrlBatch: db.prepare(`DELETE FROM download_urls WHERE batch_id = ?`),
+  cleanExpiredDownloadUrls: db.prepare(`
+    DELETE FROM download_urls WHERE created_at < ?
+  `),
 }
 
 export function dbNow() {

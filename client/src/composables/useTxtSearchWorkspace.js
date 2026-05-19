@@ -19,6 +19,8 @@ export function useTxtSearchWorkspace() {
   const activeTab = ref('pan89')
   const showConfirm = ref(false)
   const confirmItem = ref(null)
+  const downloading = ref(false)
+  const downloadError = ref('')
 
   function resetSearch() {
     SOURCES.forEach((s) => {
@@ -100,10 +102,12 @@ export function useTxtSearchWorkspace() {
     const source = activeTab.value
     const batchId = batchIdMap[source]
     if (!batchId) {
-      errorMsg.value = '搜索结果已过期，请重新搜索'
+      downloadError.value = '搜索结果已过期，请重新搜索'
       return
     }
 
+    downloading.value = true
+    downloadError.value = ''
     try {
       const r = await fetch('/api/txtsearch/download-claim', {
         method: 'POST',
@@ -119,7 +123,9 @@ export function useTxtSearchWorkspace() {
       a.download = item.fileName || 'download.txt'
       a.click()
     } catch (e) {
-      errorMsg.value = e.message || '下载失败，请检查账号余量'
+      downloadError.value = e.message || '下载失败，请检查账号余量'
+    } finally {
+      downloading.value = false
     }
   }
 
@@ -144,6 +150,8 @@ export function useTxtSearchWorkspace() {
     activeTab,
     showConfirm,
     confirmItem,
+    downloading,
+    downloadError,
     search,
     openConfirm,
     cancelDownload,
