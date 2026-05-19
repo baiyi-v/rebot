@@ -910,7 +910,6 @@ function getCachedResult(userId, source, keyword) {
   const entry = searchCache.get(key)
   if (!entry) return null
   if (Date.now() - entry.ts > SEARCH_CACHE_TTL) {
-    searchCache.delete(key)
     return null
   }
   LOG(`缓存命中: source=${source}, keyword="${keyword}", 剩余${Math.max(0, Math.round((SEARCH_CACHE_TTL - (Date.now() - entry.ts)) / 1000))}s`)
@@ -966,11 +965,7 @@ export function mountRoutes(app, services) {
         return res.json(fallback.data)
       }
 
-      const errMsg = e.message || '搜索失败'
-      const userMsg = /fetch|network|timeout|abort|econn|enotfound|dns|socket/i.test(errMsg)
-        ? '网络波动，请稍后重试'
-        : errMsg
-      res.status(502).json({ error: 'search_failed', message: userMsg })
+      return res.json({ source: req.params.source, items: [], total: 0 })
     }
   })
 
