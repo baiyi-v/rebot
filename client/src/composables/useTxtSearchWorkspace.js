@@ -1,11 +1,18 @@
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive } from 'vue'
 import { apiHeaders } from '../api.js'
+import { auth } from '../auth.js'
+import { toastError, toastInfo, toastSuccess } from '../toast.js'
 
 const SOURCES = [
   { slug: 'pan89', label: '源1' },
   { slug: 'nailong', label: '源2' },
   { slug: 'ilanzou', label: '源3' },
 ]
+
+function sourceLabel(raw) {
+  const s = SOURCES.find((s) => s.slug === String(raw).toLowerCase())
+  return s ? s.label : raw
+}
 
 const STORAGE_KEY = 'txtsearch_last_keyword'
 
@@ -15,12 +22,10 @@ export function useTxtSearchWorkspace() {
   const batchIdMap = reactive({})
   const loading = ref(false)
   const sourceStatus = ref({})
-  const errorMsg = ref('')
   const activeTab = ref('pan89')
   const showConfirm = ref(false)
   const confirmItem = ref(null)
   const downloading = ref(false)
-  const downloadError = ref('')
 
   function resetSearch() {
     SOURCES.forEach((s) => {
@@ -55,12 +60,11 @@ export function useTxtSearchWorkspace() {
   async function search() {
     const kw = keyword.value.trim()
     if (!kw) {
-      errorMsg.value = '请输入搜索关键词'
+      toastError('请输入搜索关键词')
       return
     }
 
     loading.value = true
-    errorMsg.value = ''
     resetSearch()
 
     await Promise.all(SOURCES.map((s) => searchOne(kw, s)))
@@ -70,17 +74,9 @@ export function useTxtSearchWorkspace() {
 
     const total = SOURCES.reduce((sum, s) => sum + (sourceResults[s.slug]?.length || 0), 0)
     if (total === 0 && !Object.values(sourceStatus.value).some((v) => v === 'loading')) {
-      errorMsg.value = '未找到相关文件，请尝试更换关键词'
+      toastInfo('网络波动，请等待1~2分钟后重试')
     }
   }
-
-  onMounted(() => {
-    const saved = sessionStorage.getItem(STORAGE_KEY)
-    if (saved && saved.trim()) {
-      keyword.value = saved
-      search()
-    }
-  })
 
   function openConfirm(item) {
     confirmItem.value = item
@@ -94,38 +90,61 @@ export function useTxtSearchWorkspace() {
 
   async function doDownload() {
     const item = confirmItem.value
-    showConfirm.value = false
-    confirmItem.value = null
-
-    if (item.dlIndex == null) return
-
     const source = activeTab.value
     const batchId = batchIdMap[source]
+
+    if (item.dlIndex == null) return
     if (!batchId) {
-      downloadError.value = '搜索结果已过期，请重新搜索'
+      showConfirm.value = false
+      confirmItem.value = null
+      toastError('搜索结果已过期，请重新搜索')
       return
     }
 
     downloading.value = true
-    downloadError.value = ''
     try {
-      const r = await fetch('/api/txtsearch/download-claim', {
+      const claimR = await fetch('/api/txtsearch/download-claim', {
         method: 'POST',
         headers: apiHeaders(true),
         body: JSON.stringify({ batchId, dlIndex: item.dlIndex, fileName: item.fileName }),
       })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data.message || `HTTP ${r.status}`)
+      const claimData = await claimR.json()
+      if (!claimR.ok) throw new Error(claimData.message || `HTTP ${claimR.status}`)
 
-      const url = `/txtsearch-dl?token=${encodeURIComponent(data.token)}&name=${encodeURIComponent(item.fileName)}`
+      const dlUrl = `/txtsearch-dl?token=${encodeURIComponent(claimData.token)}&name=${encodeURIComponent(item.fileName)}`
+      const dlR = await fetch(dlUrl, { headers: apiHeaders() })
+
+      if (!dlR.ok) {
+        const errData = await dlR.json().catch(() => ({}))
+        throw new Error(errData.message || `服务器返回 ${dlR.status}`)
+      }
+
+      const contentType = dlR.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        const errData = await dlR.json().catch(() => ({}))
+        throw new Error(errData.message || '下载请求被拒绝')
+      }
+
+      const blob = await dlR.blob()
+      const objectUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url
+      a.href = objectUrl
       a.download = item.fileName || 'download.txt'
+      document.body.appendChild(a)
       a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(objectUrl)
+
+      if (auth.user && auth.user.downloads_remaining > 0) {
+        auth.user.downloads_remaining--
+        toastSuccess(`下载成功 · 剩余 ${auth.user.downloads_remaining} 次`)
+      }
     } catch (e) {
-      downloadError.value = e.message || '下载失败，请检查账号余量'
+      toastError(e.message || '下载失败，请检查账号余量')
     } finally {
       downloading.value = false
+      showConfirm.value = false
+      confirmItem.value = null
     }
   }
 
@@ -144,19 +163,18 @@ export function useTxtSearchWorkspace() {
     sourceResults,
     batchIdMap,
     loading,
-    errorMsg,
     sourceStatus,
     SOURCES,
     activeTab,
     showConfirm,
     confirmItem,
     downloading,
-    downloadError,
     search,
     openConfirm,
     cancelDownload,
     doDownload,
     formatSize,
     totalCount,
+    sourceLabel,
   }
 }

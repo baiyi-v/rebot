@@ -9,20 +9,19 @@ const {
   keyword,
   sourceResults,
   loading,
-  errorMsg,
   sourceStatus,
   SOURCES,
   activeTab,
   showConfirm,
   confirmItem,
   downloading,
-  downloadError,
   search,
   openConfirm,
   cancelDownload,
   doDownload,
   formatSize,
   totalCount,
+  sourceLabel,
 } = useTxtSearchWorkspace()
 
 function onKeydown(e) {
@@ -84,12 +83,6 @@ function statusIcon(slug) {
       </button>
     </div>
 
-    <div v-if="errorMsg && loading" class="banner banner--info">
-      正在搜索中...结果快的书库优先返回
-    </div>
-
-    <div v-if="errorMsg && !loading" class="banner banner--error">{{ errorMsg }}</div>
-
     <div class="tabs-bar">
       <button
         v-for="s in SOURCES"
@@ -118,7 +111,7 @@ function statusIcon(slug) {
             <div class="result-row__meta">
               <span v-if="item.fileSizeText" class="result-row__size">{{ item.fileSizeText }}</span>
               <span v-if="item.addTime" class="result-row__time">{{ item.addTime }}</span>
-              <span class="result-row__source">{{ item.searchSource }}</span>
+              <span class="result-row__source">{{ sourceLabel(item.searchSource) }}</span>
             </div>
           </div>
           <button class="btn btn--primary result-row__dl" @click="openConfirm(item)">下载</button>
@@ -143,11 +136,11 @@ function statusIcon(slug) {
           <div class="confirm-dialog__name">{{ confirmItem?.fileName }}</div>
           <div v-if="confirmItem?.fileSizeText" class="confirm-dialog__size">文件大小: {{ confirmItem.fileSizeText }}</div>
           <div class="confirm-dialog__hint">下载将消耗 1 次下载次数</div>
-          <div v-if="downloadError" class="confirm-dialog__error">{{ downloadError }}</div>
           <div class="confirm-dialog__actions">
             <button class="btn" @click="cancelDownload">取消</button>
             <button class="btn btn--primary" :disabled="downloading" @click="doDownload">
               <span v-if="downloading" class="spinner"></span>
+              <span v-if="downloading">下载中…</span>
               <span v-else>确认下载（-1次）</span>
             </button>
           </div>
@@ -506,15 +499,6 @@ function statusIcon(slug) {
   margin-top: 12px;
   padding: 8px 12px;
   background: rgba(251, 191, 36, 0.1);
-  border-radius: 6px;
-}
-
-.confirm-dialog__error {
-  font-size: 13px;
-  color: #fecaca;
-  margin-top: 12px;
-  padding: 8px 12px;
-  background: rgba(239, 68, 68, 0.15);
   border-radius: 6px;
 }
 

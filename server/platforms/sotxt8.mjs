@@ -538,7 +538,7 @@ async function searchMode(userId, keyword, mode, options = {}) {
 }
 
 // ---- 保存搜索结果到服务端批次 ----
-async function saveResults(userId, results, action = 'reset', batchId = '', retry = true) {
+async function saveResults(userId, results, action = 'reset', batchId = '') {
   const sess = getSession(userId)
   const payload = {
     csrf_token: sess.csrfToken,
@@ -564,21 +564,7 @@ async function saveResults(userId, results, action = 'reset', batchId = '', retr
 
   if (data?.success) return data
 
-  // 批次过期自动重建
   const errMsg = data?.error || data?.message || ''
-  const isExpired = /过期|已失效|expired|重新搜索/i.test(errMsg)
-  if (isExpired && retry && action !== 'reset') {
-    LOG(`批次已过期，自动重建批次并重试`)
-    // 清空该用户所有批次缓存
-    const prefix = `${userId}::`
-    for (const k of batches.keys()) {
-      if (k.startsWith(prefix)) batches.delete(k)
-    }
-    const newBatchId = createBatchId()
-    await saveResults(userId, [], 'reset', newBatchId, false)
-    return saveResults(userId, results, action, newBatchId, false)
-  }
-
   throw new Error(errMsg || '保存搜索结果失败')
 }
 
