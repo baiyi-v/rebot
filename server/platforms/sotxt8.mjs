@@ -956,7 +956,11 @@ export function mountRoutes(app, services) {
     } catch (e) {
       LOG(`搜索 ${req.params.source} 异常: ${e.message}`)
       console.error('[sotxt8] 搜索失败:', e)
-      res.status(502).json({ error: 'search_failed', message: e.message || '搜索失败' })
+      const errMsg = e.message || '搜索失败'
+      const userMsg = /fetch|network|timeout|abort|econn|enotfound|dns|socket/i.test(errMsg)
+        ? '网络波动，请稍后重试'
+        : errMsg
+      res.status(502).json({ error: 'search_failed', message: userMsg })
     }
   })
 
@@ -1044,7 +1048,11 @@ export function mountRoutes(app, services) {
       refundJobCredit(req.user.id)
       LOG(`已退还下载次数(异常): user=${req.user.username}`)
       if (!res.headersSent) {
-        res.status(502).json({ error: 'download_failed', message: e.message })
+        const errMsg = e.message || '下载失败'
+        const userMsg = /fetch|network|timeout|abort|econn|enotfound|dns|socket/i.test(errMsg)
+          ? '网络波动，请稍后重试'
+          : errMsg
+        res.status(502).json({ error: 'download_failed', message: userMsg })
       }
     }
   })
