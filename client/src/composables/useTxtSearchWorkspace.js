@@ -202,7 +202,10 @@ export function useTxtSearchWorkspace() {
 
       if (auth.user && auth.user.downloads_remaining > 0) {
         await auth.loadMe()
-        toastSuccess(` · 剩余 ${auth.user.downloads_remaining} 次`)
+        toastSuccess(`下载成功 · 剩余 ${auth.user.downloads_remaining} 次`)
+      } else {
+        await auth.loadMe()
+        toastSuccess(`下载成功`)
       }
     } catch (e) {
       toastError(e.message || '下载失败，请检查账号余量')
