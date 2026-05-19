@@ -300,7 +300,7 @@ async function refreshSession(userId) {
     throw new Error(`刷新会话失败: HTTP ${resp.status}`)
   }
   const html = await resp.text()
-  LOG(`刷新会话 HTML 长度: ${html.length}B`)
+  // LOG(`刷新会话 HTML 长度: ${html.length}B`)
 
   sess.indexHtml = html
 
@@ -345,32 +345,50 @@ async function searchGuard(userId, keyword) {
     const isSessionStale = /安全校验失败.*刷新|PHPSESSID.*过期|会话.*过期|session.*expire/i.test(msg)
 
     if (isSessionStale) {
-      LOG('检测到会话过期（安全校验失败），清除 PHPSESSID 后重新获取...')
-      sess.cookies = sess.cookies.replace(/PHPSESSID=[^;]*;?\s*/gi, '').replace(/;\s*$/, '')
-      if (!sess.cookies) sess.cookies = 'site_device_code=' + (process.env.SOTXT8_COOKIES || '').match(/site_device_code=([^;]+)/)?.[1] || ''
+      LOG('检测到会话过期（安全校验失败），用现有 cookie 刷新会话...')
 
       const htmlResp = await sotxt8Fetch(userId, `${BASE}/index.php`, {
         headers: {
           Accept: 'text/html,application/xhtml+xml',
           Referer: `${BASE}/index.php`,
         },
-        _403retry: true,
       })
       LOG(`获取 index.php: HTTP ${htmlResp.status}`)
-      if (htmlResp.ok) {
-        const html = await htmlResp.text()
-        sess.indexHtml = html
 
-        const srtM = html.match(/SITE_SEARCH_REQUEST_TOKEN\s*=\s*"([^"]+)"/)
-        if (srtM) sess.searchRequestToken = srtM[1]
-
-        const csrfM = html.match(/(?:csrf_token|csrfToken)\s*[:=]\s*["']([a-f0-9]{32})["']/i)
-            || html.match(/name=["']csrf_token["']\s+value=["']([a-f0-9]{32})["']/i)
-        if (csrfM) sess.csrfToken = csrfM[1]
-
-        await persistCookies(sess.cookies)
-        LOG(`已更新 cookies: ${sess.cookies.slice(0, 80)}...`)
+      if (!htmlResp.ok) {
+        LOG(`index.php 返回 ${htmlResp.status}，尝试重新登录...`)
+        await login(userId)
+        const retryBody2 = new URLSearchParams({ keyword: keyword.trim(), csrf_token: sess.csrfToken })
+        const retryResp2 = await sotxt8Fetch(userId, `${BASE}/api_search_guard.php`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            Origin: BASE,
+            Referer: `${BASE}/index.php`,
+          },
+          body: retryBody2.toString(),
+        })
+        const retryData2 = await retryResp2.json()
+        LOG(`搜索守卫重试结果(重新登录后): success=${retryData2?.success}, blocked=${retryData2?.blocked}, message="${retryData2?.message || ''}"`)
+        if (retryData2?.success) {
+          return retryData2
+        }
+        throw new Error('数据处理异常请等待稍后访问')
       }
+
+      const html = await htmlResp.text()
+      sess.indexHtml = html
+
+      const srtM = html.match(/SITE_SEARCH_REQUEST_TOKEN\s*=\s*"([^"]+)"/)
+      if (srtM) sess.searchRequestToken = srtM[1]
+
+      const csrfM = html.match(/(?:csrf_token|csrfToken)\s*[:=]\s*["']([a-f0-9]{32})["']/i)
+          || html.match(/name=["']csrf_token["']\s+value=["']([a-f0-9]{32})["']/i)
+      if (csrfM) sess.csrfToken = csrfM[1]
+
+      await persistCookies(sess.cookies)
+      LOG(`已更新 cookies: ${sess.cookies.slice(0, 80)}...`)
 
       const retryBody = new URLSearchParams({ keyword: keyword.trim(), csrf_token: sess.csrfToken })
       const retryResp = await sotxt8Fetch(userId, `${BASE}/api_search_guard.php`, {
