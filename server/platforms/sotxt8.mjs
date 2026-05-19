@@ -344,8 +344,33 @@ async function searchGuard(userId, keyword) {
     const isSessionStale = /安全校验失败.*刷新|PHPSESSID.*过期|会话.*过期|session.*expire/i.test(msg)
 
     if (isSessionStale) {
-      LOG('检测到会话过期（安全校验失败），刷新 index.php 更新 cookie 后重试...')
-      await refreshSession(userId)
+      LOG('检测到会话过期（安全校验失败），清除 PHPSESSID 后重新获取...')
+      sess.cookies = sess.cookies.replace(/PHPSESSID=[^;]*;?\s*/gi, '').replace(/;\s*$/, '')
+      if (!sess.cookies) sess.cookies = 'site_device_code=' + (process.env.SOTXT8_COOKIES || '').match(/site_device_code=([^;]+)/)?.[1] || ''
+
+      const htmlResp = await sotxt8Fetch(userId, `${BASE}/index.php`, {
+        headers: {
+          Accept: 'text/html,application/xhtml+xml',
+          Referer: `${BASE}/index.php`,
+        },
+        _403retry: true,
+      })
+      LOG(`获取 index.php: HTTP ${htmlResp.status}`)
+      if (htmlResp.ok) {
+        const html = await htmlResp.text()
+        sess.indexHtml = html
+
+        const srtM = html.match(/SITE_SEARCH_REQUEST_TOKEN\s*=\s*"([^"]+)"/)
+        if (srtM) sess.searchRequestToken = srtM[1]
+
+        const csrfM = html.match(/(?:csrf_token|csrfToken)\s*[:=]\s*["']([a-f0-9]{32})["']/i)
+            || html.match(/name=["']csrf_token["']\s+value=["']([a-f0-9]{32})["']/i)
+        if (csrfM) sess.csrfToken = csrfM[1]
+
+        await persistCookies(sess.cookies)
+        LOG(`已更新 cookies: ${sess.cookies.slice(0, 80)}...`)
+      }
+
       const retryResp = await sotxt8Fetch(userId, `${BASE}/api_search_guard.php`, {
         method: 'POST',
         headers: {
