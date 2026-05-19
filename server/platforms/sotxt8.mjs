@@ -35,7 +35,11 @@ if (SOTXT8_PROXY) {
   }
 }
 
-const LOG = (...a) => console.log('[sotxt8]', ...a)
+const LOG = (() => {
+  // 生产环境关闭调试日志：设置 SOTXT8_LOG_LEVEL=prod
+  if ((process.env.SOTXT8_LOG_LEVEL || '').toLowerCase() === 'prod') return () => {}
+  return (...a) => console.log('[sotxt8]', ...a)
+})()
 
 function xorDecode(encoded) {
   const raw = Buffer.from(encoded, 'base64')

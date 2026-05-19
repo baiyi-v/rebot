@@ -39,7 +39,11 @@ async function getPuppeteer() {
   return puppeteerModule
 }
 
-const LOG = (...a) => console.log('[sotxt8:quark]', ...a)
+const LOG = (() => {
+  // 生产环境关闭调试日志：设置 SOTXT8_LOG_LEVEL=prod
+  if ((process.env.SOTXT8_LOG_LEVEL || '').toLowerCase() === 'prod') return () => {}
+  return (...a) => console.log('[sotxt8:quark]', ...a)
+})()
 
 // ---- 夸克授权状态（供 sotxt8.mjs 查询） ----
 const quarkAuthState = {
