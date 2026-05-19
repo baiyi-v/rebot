@@ -1,0 +1,26 @@
+{
+  "name": "tomato-novel-manager",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"pnpm --filter tomato-novel-proxy dev\" \"pnpm --filter tomato-novel-client dev\"",
+    "build": "pnpm --filter tomato-novel-client build",
+    "start": "pnpm --filter tomato-novel-proxy start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "puppeteer": "^24.43.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

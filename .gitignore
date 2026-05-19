@@ -1,0 +1,14 @@
+node_modules
+
+# # 环境变量（含密钥）
+# .env
+
+# 运行时日志
+.runtime/
+
+# Puppeteer 浏览器缓存（profile、cookies、下载文件）
+node_modules/.cache/
+
+# SQLite 数据库
+server/data/
+server/server/data/

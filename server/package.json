@@ -1,0 +1,14 @@
+{
+  "name": "tomato-novel-proxy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs",
+    "dev": "node index.mjs --port 3001"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
