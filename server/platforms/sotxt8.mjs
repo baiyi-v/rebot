@@ -956,6 +956,16 @@ export function mountRoutes(app, services) {
     } catch (e) {
       LOG(`搜索 ${req.params.source} 异常: ${e.message}`)
       console.error('[sotxt8] 搜索失败:', e)
+
+      const userId = req.user?.id || 'anon'
+      const fallbackKey = getCacheKey(userId, req.params.source, String(req.body?.keyword || '').trim())
+      const fallback = searchCache.get(fallbackKey)
+
+      if (fallback) {
+        LOG(`搜索失败，返回上一次缓存结果: source=${req.params.source}, keyword="${req.body?.keyword}"`)
+        return res.json(fallback.data)
+      }
+
       const errMsg = e.message || '搜索失败'
       const userMsg = /fetch|network|timeout|abort|econn|enotfound|dns|socket/i.test(errMsg)
         ? '网络波动，请稍后重试'
