@@ -939,7 +939,7 @@ function setCachedResult(userId, source, keyword, data) {
 
 // ---- 挂载路由 ----
 export function mountRoutes(app, services) {
-  const { requireUser, requireJobQuota, consumeJobCredit, getLocalLibraryRoot } = services
+  const { requireUser, requireJobQuota, consumeJobCredit, refundJobCredit, getLocalLibraryRoot } = services
 
   app.post('/api/txtsearch/search/:source', requireUser, async (req, res) => {
     try {
@@ -1040,6 +1040,7 @@ export function mountRoutes(app, services) {
       if (!resp.ok) {
         const text = await resp.text().catch(() => '')
         LOG(`代理下载失败:`, text)
+        refundJobCredit(req.user.id)
         return res.status(502).json({ error: 'download_failed', message: `上游返回 HTTP ${resp.status}` })
       }
 
@@ -1067,6 +1068,7 @@ export function mountRoutes(app, services) {
       res.end(buf)
     } catch (e) {
       LOG(`代理下载异常: ${e.message}`)
+      refundJobCredit(req.user.id)
       if (!res.headersSent) {
         const errMsg = e.message || '下载失败'
         const userMsg = /fetch|network|timeout|abort|econn|enotfound|dns|socket/i.test(errMsg)

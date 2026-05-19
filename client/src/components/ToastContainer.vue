@@ -32,12 +32,15 @@ function icon(kind) {
 .toast-stack {
   position: fixed;
   top: 16px;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 99999;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
   max-width: 400px;
+  width: max-content;
   pointer-events: none;
 }
 
@@ -91,11 +94,26 @@ function icon(kind) {
 
 .toast-enter-from {
   opacity: 0;
-  transform: translateX(40px);
+  transform: translateY(-10px);
 }
 
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(40px);
+  transform: translateY(-10px);
+}
+
+@media (max-width: 768px) {
+  .toast-stack {
+    left: 8px;
+    right: 8px;
+    transform: none;
+    max-width: none;
+    width: auto;
+  }
+
+  .toast {
+    font-size: 14px;
+    padding: 12px 16px;
+  }
 }
 </style>

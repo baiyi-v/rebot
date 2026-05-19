@@ -27,6 +27,70 @@ export function useTxtSearchWorkspace() {
   const confirmItem = ref(null)
   const downloading = ref(false)
 
+  const RESULTS_STORAGE_KEY = 'txtsearch_last_results'
+
+  function saveSearchState() {
+    try {
+      const state = {
+        keyword: keyword.value,
+        sourceResults: SOURCES.reduce((acc, s) => {
+          acc[s.slug] = sourceResults[s.slug] || []
+          return acc
+        }, {}),
+        batchIdMap: SOURCES.reduce((acc, s) => {
+          acc[s.slug] = batchIdMap[s.slug] || ''
+          return acc
+        }, {}),
+        sourceStatus: SOURCES.reduce((acc, s) => {
+          acc[s.slug] = sourceStatus.value[s.slug] || 'idle'
+          return acc
+        }, {}),
+        activeTab: activeTab.value,
+      }
+      sessionStorage.setItem(RESULTS_STORAGE_KEY, JSON.stringify(state))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function loadSearchState() {
+    try {
+      const raw = sessionStorage.getItem(RESULTS_STORAGE_KEY)
+      if (!raw) return
+      const state = JSON.parse(raw)
+      if (!state) return
+
+      if (state.sourceResults) {
+        SOURCES.forEach((s) => {
+          if (Array.isArray(state.sourceResults[s.slug])) {
+            sourceResults[s.slug] = state.sourceResults[s.slug]
+          }
+        })
+      }
+      if (state.batchIdMap) {
+        SOURCES.forEach((s) => {
+          if (typeof state.batchIdMap[s.slug] === 'string') {
+            batchIdMap[s.slug] = state.batchIdMap[s.slug]
+          }
+        })
+      }
+      if (state.sourceStatus) {
+        SOURCES.forEach((s) => {
+          if (typeof state.sourceStatus[s.slug] === 'string') {
+            sourceStatus.value[s.slug] = state.sourceStatus[s.slug]
+          }
+        })
+      }
+      if (state.activeTab && SOURCES.some((s) => s.slug === state.activeTab)) {
+        activeTab.value = state.activeTab
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  loadSearchState()
+
   function resetSearch() {
     SOURCES.forEach((s) => {
       sourceResults[s.slug] = []
@@ -71,6 +135,7 @@ export function useTxtSearchWorkspace() {
 
     loading.value = false
     sessionStorage.setItem(STORAGE_KEY, kw)
+    saveSearchState()
 
     const total = SOURCES.reduce((sum, s) => sum + (sourceResults[s.slug]?.length || 0), 0)
     if (total === 0 && !Object.values(sourceStatus.value).some((v) => v === 'loading')) {
@@ -136,7 +201,7 @@ export function useTxtSearchWorkspace() {
       URL.revokeObjectURL(objectUrl)
 
       if (auth.user && auth.user.downloads_remaining > 0) {
-        auth.user.downloads_remaining--
+        await auth.loadMe()
         toastSuccess(`下载成功 · 剩余 ${auth.user.downloads_remaining} 次`)
       }
     } catch (e) {
