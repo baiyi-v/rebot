@@ -202,7 +202,7 @@ export function useTxtSearchWorkspace() {
 
       if (auth.user && auth.user.downloads_remaining > 0) {
         await auth.loadMe()
-        toastSuccess(`下载成功 · 剩余 ${auth.user.downloads_remaining} 次`)
+        toastSuccess(`下载成功 · 下载次数 -1`)
       } else {
         await auth.loadMe()
         toastSuccess(`下载成功`)

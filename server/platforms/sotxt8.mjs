@@ -939,7 +939,7 @@ function setCachedResult(userId, source, keyword, data) {
 
 // ---- 挂载路由 ----
 export function mountRoutes(app, services) {
-  const { requireUser, requireJobQuota, consumeJobCredit, getLocalLibraryRoot } = services
+  const { requireUser, requireJobQuota, consumeJobCredit, refundJobCredit, getLocalLibraryRoot } = services
 
   app.post('/api/txtsearch/search/:source', requireUser, async (req, res) => {
     try {
@@ -1063,6 +1063,18 @@ export function mountRoutes(app, services) {
       res.setHeader('Cache-Control', 'no-cache')
 
       const buf = Buffer.from(await resp.arrayBuffer())
+
+      const ctLower = ct.toLowerCase()
+      const isText = ctLower.includes('text') || ctLower.includes('html') || ctLower.includes('json')
+      if (isText) {
+        const bodyText = buf.toString('utf-8').slice(0, 2000)
+        if (bodyText.includes('当前下载会话已失效') || bodyText.includes('请返回搜索页重新搜索')) {
+          LOG(`下载内容为会话失效提示，退还次数`)
+          refundJobCredit(req.user.id)
+          return res.status(400).json({ error: 'session_expired', message: '当前下载会话已失效，请返回搜索页重新搜索后再下载' })
+        }
+      }
+
       res.setHeader('Content-Length', buf.length)
       res.end(buf)
     } catch (e) {
