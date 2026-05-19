@@ -371,6 +371,7 @@ async function searchGuard(userId, keyword) {
         LOG(`已更新 cookies: ${sess.cookies.slice(0, 80)}...`)
       }
 
+      const retryBody = new URLSearchParams({ keyword: keyword.trim(), csrf_token: sess.csrfToken })
       const retryResp = await sotxt8Fetch(userId, `${BASE}/api_search_guard.php`, {
         method: 'POST',
         headers: {
@@ -379,7 +380,7 @@ async function searchGuard(userId, keyword) {
           Origin: BASE,
           Referer: `${BASE}/index.php`,
         },
-        body: body.toString(),
+        body: retryBody.toString(),
       })
       const retryData = await retryResp.json()
       LOG(`搜索守卫重试结果(会话刷新后): success=${retryData?.success}, blocked=${retryData?.blocked}, message="${retryData?.message || ''}"`)
@@ -399,6 +400,7 @@ async function searchGuard(userId, keyword) {
       if (state.status === 'completed') {
         LOG('夸克授权此前已完成，刷新会话并重试守卫...')
         await refreshSession(userId)
+        const retryBody2 = new URLSearchParams({ keyword: keyword.trim(), csrf_token: sess.csrfToken })
         const retryResp = await sotxt8Fetch(userId, `${BASE}/api_search_guard.php`, {
           method: 'POST',
           headers: {
@@ -407,7 +409,7 @@ async function searchGuard(userId, keyword) {
             Origin: BASE,
             Referer: `${BASE}/index.php`,
           },
-          body: body.toString(),
+          body: retryBody2.toString(),
         })
         const retryData = await retryResp.json()
         LOG(`搜索守卫重试结果: success=${retryData?.success}, blocked=${retryData?.blocked}, message="${retryData?.message || ''}"`)
