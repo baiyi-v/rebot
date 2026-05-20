@@ -444,6 +444,12 @@ async function searchGuard(userId, keyword) {
         throw new Error('授权进行中，请稍后再试')
       }
 
+      const now = Date.now()
+      if (state.status === 'failed' && state.failedAt > 0 && (now - state.failedAt) < 120000) {
+        LOG(`夸克授权 ${Math.round((now - state.failedAt) / 1000)}s 前刚失败，不重复尝试: ${state.error}`)
+        throw new Error('授权失败，请稍后重试')
+      }
+
       LOG('状态为 idle/failed，启动异步夸克网盘授权流程...')
 
       let indexHtml = sess.indexHtml || null

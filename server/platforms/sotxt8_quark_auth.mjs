@@ -32,8 +32,11 @@ async function findChromePath() {
 
   try {
     const puppeteer = await import('puppeteer')
-    chromePath = puppeteer.executablePath()
-    if (chromePath) return chromePath
+    const ppPath = puppeteer.executablePath()
+    if (ppPath && fsSync.existsSync(ppPath)) {
+      chromePath = ppPath
+      return ppPath
+    }
   } catch { /* puppeteer 不可用 */ }
 
   const candidates = [
@@ -84,6 +87,7 @@ const LOG = (() => {
 const quarkAuthState = {
   status: 'idle',
   completedAt: 0,
+  failedAt: 0,
   error: '',
 }
 
@@ -861,6 +865,7 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
     LOG(`自动授权流程失败: ${e.message}`)
     console.error('[sotxt8:quark] 授权异常:', e)
     quarkAuthState.status = 'failed'
+    quarkAuthState.failedAt = Date.now()
     quarkAuthState.error = e.message
     return false
   } finally {
