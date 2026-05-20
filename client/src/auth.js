@@ -124,6 +124,17 @@ export const auth = reactive({
     return data
   },
 
+  async getCardInfo(code) {
+    const r = await fetch(`/api/cards/info/${encodeURIComponent(code)}`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`)
+    return data
+  },
+
   async redeem(code) {
     const r = await fetch('/api/cards/redeem', {
       method: 'POST',
@@ -137,6 +148,17 @@ export const auth = reactive({
     if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`)
     if (data.user) this.user = data.user
     return data
+  },
+
+  async loadPools() {
+    const r = await fetch('/api/user/pools', {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`)
+    return data.pools || []
   },
 
   membershipActive() {

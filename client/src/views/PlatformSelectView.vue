@@ -5,11 +5,12 @@ import { auth } from '../auth.js'
 
 const router = useRouter()
 
-const activePlatforms = new Set(['tomato', 'txtsearch'])
+const activePlatforms = new Set(['tomato', 'txtsearch', 'zhihu'])
 
 const platformRoutes = {
   tomato: '/app/tomato',
   txtsearch: '/app/txtsearch',
+  zhihu: '/app/zhihu',
 }
 
 onMounted(async () => {
@@ -58,7 +59,7 @@ function isActive(slug) {
           v-if="isActive(p.slug)"
           type="button"
           class="plat-card"
-          :class="{ 'plat-card--tomato': p.slug === 'tomato', 'plat-card--txtsearch': p.slug === 'txtsearch' }"
+          :class="{ 'plat-card--tomato': p.slug === 'tomato', 'plat-card--txtsearch': p.slug === 'txtsearch', 'plat-card--zhihu': p.slug === 'zhihu' }"
           @click="enterPlatform(p.slug)"
         >
           <span class="plat-card__name">{{ p.name }}</span>
@@ -86,6 +87,7 @@ export function activePlatformDesc(slug) {
   switch (slug) {
     case 'tomato': return '链接解析、下载任务、本机成品（Tomato 下载器）'
     case 'txtsearch': return '在线书库搜索，直接下载 TXT 小说文件'
+    case 'zhihu': return '知乎小说搜索与正文解析（多路线自动切换）'
     default: return '专属下载功能'
   }
 }
@@ -179,6 +181,17 @@ export function activePlatformDesc(slug) {
   transform: translateY(-3px);
   box-shadow: 0 12px 28px rgba(34, 197, 94, 0.22);
   border-color: rgba(74, 222, 128, 0.55);
+}
+
+.plat-card--zhihu {
+  border-color: rgba(14, 165, 233, 0.55);
+  background: linear-gradient(165deg, rgba(14, 165, 233, 0.12), var(--bg-panel));
+}
+
+.plat-card--zhihu:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(14, 165, 233, 0.22);
+  border-color: rgba(56, 189, 248, 0.55);
 }
 
 .plat-card--soon {

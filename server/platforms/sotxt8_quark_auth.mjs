@@ -11,6 +11,7 @@
 import path from 'node:path'
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { execSync } from 'node:child_process'
 
@@ -24,6 +25,40 @@ const BASE = 'https://sotxt8.com'
 const QUARK_BASE = 'https://pan.quark.cn'
 
 let puppeteerModule = null
+let chromePath = null
+
+async function findChromePath() {
+  if (chromePath) return chromePath
+
+  try {
+    const puppeteer = await import('puppeteer')
+    chromePath = puppeteer.executablePath()
+    if (chromePath) return chromePath
+  } catch { /* puppeteer 不可用 */ }
+
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    process.env.CHROMIUM_PATH,
+    process.platform === 'win32' && 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    process.platform === 'win32' && 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    process.platform === 'win32' && path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+    process.platform === 'darwin' && '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    process.platform === 'linux' && '/usr/bin/google-chrome',
+    process.platform === 'linux' && '/usr/bin/chromium-browser',
+    process.platform === 'linux' && '/usr/bin/chromium',
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    if (fsSync.existsSync(candidate)) {
+      chromePath = candidate
+      return candidate
+    }
+  }
+
+  return null
+}
+
 async function getPuppeteer() {
   if (!puppeteerModule) {
     try {
@@ -744,11 +779,16 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
     }
 
     const puppeteerModule = await getPuppeteer()
-    LOG('启动浏览器（headed 模式，可手动登录）...')
+    const exePath = await findChromePath()
+    if (!exePath) {
+      throw new Error('找不到可用的 Chrome/Chromium 浏览器，请安装 Chrome 或设置 PUPPETEER_EXECUTABLE_PATH 环境变量')
+    }
+    LOG(`启动浏览器（headed 模式，可手动登录）... Chrome: ${exePath}`)
 
     await fs.mkdir(QUARK_USER_DATA_DIR, { recursive: true })
 
     const browser = await puppeteerModule.launch({
+      executablePath: exePath,
       headless: false,
       userDataDir: QUARK_USER_DATA_DIR,
       args: [

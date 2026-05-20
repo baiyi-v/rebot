@@ -67,14 +67,8 @@ export function requireJobQuota(req, res, next) {
   }
   if (!membershipActive(req.user)) {
     return res.status(403).json({
-      error: 'membership_expired',
-      message: '会员已过期或未激活，请使用卡密充值',
-    })
-  }
-  if (req.user.downloads_remaining <= 0) {
-    return res.status(403).json({
       error: 'no_downloads',
-      message: '下载次数已用完，请使用卡密充值',
+      message: '下载次数已用完或已过期，请使用卡密充值',
     })
   }
   next()
@@ -268,6 +262,33 @@ export function mountAuthRoutes(app) {
       return res.status(status).json({ error: result.error, message: msg })
     }
     res.json({ ok: true, user: result.user })
+  })
+
+  app.get('/api/cards/info/:code', requireUser, (req, res) => {
+    const code = String(req.params.code || '')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '')
+    if (!code) return res.status(400).json({ error: 'empty_code', message: '请输入卡密' })
+
+    const row = q.cardByCode.get(code)
+    if (!row) return res.status(404).json({ error: 'invalid_code', message: '卡密无效' })
+    if (row.uses >= row.max_uses) return res.status(409).json({ error: 'code_used_up', message: '卡密已用尽' })
+
+    res.json({
+      code,
+      days: row.days,
+      downloads: row.downloads,
+      max_uses: row.max_uses,
+      uses: row.uses,
+    })
+  })
+
+  app.get('/api/user/pools', requireUser, (req, res) => {
+    const now = dbNow()
+    q.cleanExpiredPools.run(now)
+    const pools = q.getUserPools.all(req.user.id, now)
+    res.json({ pools })
   })
 
   app.post('/api/admin/cards/validate', (req, res) => {

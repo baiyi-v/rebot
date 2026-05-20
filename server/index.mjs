@@ -42,6 +42,7 @@ import { mountAuthRoutes, requireJobQuota, requireUser, authDisabled } from './a
 import { consumeJobCredit, refundJobCredit } from './auth-core.mjs'
 import { q, dbNow } from './db.mjs'
 import { mountRoutes as mountSotxt8 } from './platforms/sotxt8.mjs'
+import { mountRoutes as mountZhihu } from './platforms/zhihu.mjs'
 
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -713,6 +714,7 @@ app.use(express.urlencoded({ extended: true }))
 
 mountAuthRoutes(app)
 mountSotxt8(app, { requireUser, requireJobQuota, consumeJobCredit, refundJobCredit, getLocalLibraryRoot })
+mountZhihu(app, { requireUser, requireJobQuota, consumeJobCredit })
 
 async function buildDownloadResources(req, bookId, title = '', jobId = '') {
   const lr = getLocalLibraryRoot()

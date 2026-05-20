@@ -598,7 +598,7 @@ function decodePayload(b64) {
   return JSON.parse(buf.toString('utf-8'))
 }
 
-// ---- 共享批次管理（同一用户+关键词共享批次） ----
+// ---- 共享批次管理（同一用户+关键词共享批次，TTL 与搜索缓存一致） ----
 const batches = new Map()
 
 function batchKey(userId, keyword) {
@@ -608,18 +608,24 @@ function batchKey(userId, keyword) {
 function getOrCreateBatch(userId, keyword) {
   const k = batchKey(userId, keyword)
   if (!batches.has(k)) {
-    batches.set(k, { batchId: '', startIndex: 0, ready: false, keyword })
+    batches.set(k, { batchId: '', startIndex: 0, ready: false, keyword, ts: 0 })
   }
   return batches.get(k)
 }
 
 async function ensureBatch(userId, keyword) {
   const batch = getOrCreateBatch(userId, keyword)
-  if (batch.ready) return batch
+  const ttl = getCacheTTL()
+  if (batch.ready && batch.ts > 0 && (Date.now() - batch.ts) < ttl) return batch
+
+  if (batch.ready) {
+    LOG(`批次已过期（${Math.round((Date.now() - batch.ts) / 1000)}s），创建新批次`)
+  }
 
   batch.batchId = createBatchId()
   await saveResults(userId, [], 'reset', batch.batchId)
   batch.ready = true
+  batch.ts = Date.now()
   LOG(`批次已创建: ${batch.batchId}`)
   return batch
 }
@@ -913,8 +919,14 @@ export async function listDownloadedFiles(saveDir) {
   return results
 }
 
-// ---- 搜索结果缓存（3分钟有效期） ----
-const SEARCH_CACHE_TTL = 3 * 60 * 1000
+// ---- 搜索结果缓存（默认 3 分钟，0 禁用，通过 SOTXT8_SEARCH_CACHE_TTL 环境变量配置，单位秒） ----
+function getCacheTTL() {
+  const raw = process.env.SOTXT8_SEARCH_CACHE_TTL
+  if (raw == null || raw === '') return 3 * 60 * 1000
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return 3 * 60 * 1000
+  return Math.round(n) * 1000
+}
 const searchCache = new Map()
 
 function getCacheKey(userId, source, keyword) {
@@ -925,10 +937,12 @@ function getCachedResult(userId, source, keyword) {
   const key = getCacheKey(userId, source, keyword)
   const entry = searchCache.get(key)
   if (!entry) return null
-  if (Date.now() - entry.ts > SEARCH_CACHE_TTL) {
+  const ttl = getCacheTTL()
+  if (ttl === 0) return null
+  if (Date.now() - entry.ts > ttl) {
     return null
   }
-  LOG(`缓存命中: source=${source}, keyword="${keyword}", 剩余${Math.max(0, Math.round((SEARCH_CACHE_TTL - (Date.now() - entry.ts)) / 1000))}s`)
+  LOG(`缓存命中: source=${source}, keyword="${keyword}", 剩余${Math.max(0, Math.round((ttl - (Date.now() - entry.ts)) / 1000))}s`)
   return entry.data
 }
 

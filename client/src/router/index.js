@@ -4,6 +4,7 @@ import LoginView from '../views/LoginView.vue'
 import PlatformSelectView from '../views/PlatformSelectView.vue'
 import TomatoWorkspace from '../components/TomatoWorkspace.vue'
 import TxtSearchWorkspace from '../components/TxtSearchWorkspace.vue'
+import ZhihuWorkspace from '../components/ZhihuWorkspace.vue'
 import AccountView from '../views/AccountView.vue'
 import TutorialView from '../views/TutorialView.vue'
 import AdminView from '../views/AdminView.vue'
@@ -47,6 +48,12 @@ const router = createRouter({
       name: 'txtsearch',
       component: TxtSearchWorkspace,
       meta: { requiresAuth: true, platform: 'txtsearch' },
+    },
+    {
+      path: '/app/zhihu',
+      name: 'zhihu',
+      component: ZhihuWorkspace,
+      meta: { requiresAuth: true, platform: 'zhihu' },
     },
     {
       path: '/app/tomato/account',

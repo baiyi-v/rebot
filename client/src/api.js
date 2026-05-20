@@ -10,3 +10,27 @@ export function apiHeaders(json = false) {
   if (auth.token) h.Authorization = `Bearer ${auth.token}`
   return h
 }
+
+let _onNoDownloads = null
+
+export function setNoDownloadsHandler(handler) {
+  _onNoDownloads = handler
+}
+
+const _originalFetch = window.fetch.bind(window)
+window.fetch = async function (input, init) {
+  const res = await _originalFetch(input, init)
+  if (res.status === 403 && _onNoDownloads) {
+    const hasAuth = init?.headers?.Authorization || auth.token
+    if (hasAuth) {
+      try {
+        const cloned = res.clone()
+        const data = await cloned.json()
+        if (data?.error === 'no_downloads') {
+          _onNoDownloads()
+        }
+      } catch { /* ignore parse errors */ }
+    }
+  }
+  return res
+}

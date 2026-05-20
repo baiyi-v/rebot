@@ -124,6 +124,43 @@ CREATE TABLE IF NOT EXISTS download_urls (
 
 CREATE INDEX IF NOT EXISTS idx_download_urls_batch_id ON download_urls(batch_id);
 CREATE INDEX IF NOT EXISTS idx_download_urls_created_at ON download_urls(created_at);
+
+CREATE TABLE IF NOT EXISTS download_pools (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  card_id INTEGER NOT NULL,
+  downloads INTEGER NOT NULL,
+  remaining INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_download_pools_user_expires ON download_pools(user_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS zhihu_parsed (
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  title TEXT,
+  preview TEXT NOT NULL,
+  full_content TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS zhihu_searches (
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  name TEXT NOT NULL,
+  author TEXT,
+  book_id TEXT,
+  intro TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_zhihu_searches_account_created ON zhihu_searches(account, created_at);
 `)
 
 const userJobColumns = db.prepare(`PRAGMA table_info(user_jobs)`).all()
@@ -181,14 +218,13 @@ const seedPlatforms = db.prepare(
 )
 for (const p of [
   { slug: 'tomato', name: '番茄小说', sort_order: 10 },
-  { slug: 'sotxt8', name: '搜TXT吧', sort_order: 15 },
+  { slug: 'txtsearch', name: 'TXT搜索', sort_order: 15 },
+  { slug: 'zhihu', name: '纸糊', sort_order: 18 },
   { slug: 'fanqie', name: '（预留）', sort_order: 20 },
   { slug: 'qidian', name: '（预留）', sort_order: 30 },
 ]) {
   seedPlatforms.run(p)
 }
-
-db.exec(`UPDATE OR IGNORE platforms SET slug = 'txtsearch', name = 'TXT搜索' WHERE slug = 'sotxt8'`)
 
 export const q = {
   userByUsername: db.prepare(`SELECT * FROM users WHERE username = ?`),
@@ -313,6 +349,69 @@ export const q = {
   deleteDownloadUrlBatch: db.prepare(`DELETE FROM download_urls WHERE batch_id = ?`),
   cleanExpiredDownloadUrls: db.prepare(`
     DELETE FROM download_urls WHERE created_at < ?
+  `),
+  insertZhihuParsed: db.prepare(`
+    INSERT OR REPLACE INTO zhihu_parsed (id, account, site_id, source_url, title, preview, full_content, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  getZhihuParsed: db.prepare(`
+    SELECT * FROM zhihu_parsed WHERE id = ?
+  `),
+  getZhihuParsedByAccount: db.prepare(`
+    SELECT id, account, site_id, source_url, title, preview, created_at FROM zhihu_parsed
+    WHERE account = ? ORDER BY created_at DESC
+  `),
+  deleteZhihuParsedByUrl: db.prepare(`
+    DELETE FROM zhihu_parsed WHERE account = ? AND source_url = ?
+  `),
+  getZhihuParsedByUrl: db.prepare(`
+    SELECT * FROM zhihu_parsed WHERE account = ? AND source_url = ? LIMIT 1
+  `),
+  insertZhihuSearch: db.prepare(`
+    INSERT OR REPLACE INTO zhihu_searches (id, account, site_id, keyword, name, author, book_id, intro, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  getZhihuSearches: db.prepare(`
+    SELECT * FROM zhihu_searches WHERE account = ? AND keyword = ? ORDER BY created_at ASC
+  `),
+  cleanExpiredZhihuSearches: db.prepare(`
+    DELETE FROM zhihu_searches WHERE created_at < ?
+  `),
+  insertDownloadPool: db.prepare(`
+    INSERT INTO download_pools (user_id, card_id, downloads, remaining, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `),
+  consumeFromPool: db.prepare(`
+    UPDATE download_pools SET remaining = remaining - 1
+    WHERE id = ? AND remaining > 0
+  `),
+  refundToPool: db.prepare(`
+    UPDATE download_pools SET remaining = remaining + 1
+    WHERE id = ? AND downloads > remaining
+  `),
+  getActivePools: db.prepare(`
+    SELECT * FROM download_pools
+    WHERE user_id = ? AND remaining > 0 AND expires_at > ?
+    ORDER BY expires_at ASC
+  `),
+  getUserPools: db.prepare(`
+    SELECT dp.id, dp.card_id, dp.downloads, dp.remaining, dp.expires_at, dp.created_at,
+           ck.code, ck.days, ck.downloads AS card_downloads
+    FROM download_pools dp
+    LEFT JOIN card_keys ck ON ck.id = dp.card_id
+    WHERE dp.user_id = ? AND dp.remaining > 0 AND dp.expires_at > ?
+    ORDER BY dp.expires_at ASC
+  `),
+  sumActiveDownloads: db.prepare(`
+    SELECT COALESCE(SUM(remaining), 0) AS total FROM download_pools
+    WHERE user_id = ? AND remaining > 0 AND expires_at > ?
+  `),
+  maxPoolExpiresAt: db.prepare(`
+    SELECT COALESCE(MAX(expires_at), 0) AS max_exp FROM download_pools
+    WHERE user_id = ? AND remaining > 0 AND expires_at > ?
+  `),
+  cleanExpiredPools: db.prepare(`
+    DELETE FROM download_pools WHERE expires_at < ?
   `),
 }
 

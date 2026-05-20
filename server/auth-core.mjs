@@ -48,32 +48,72 @@ export function getUserFromToken(token) {
 
 export function userPublic(u) {
   if (!u) return null
+  const now = dbNow()
+  const total = q.sumActiveDownloads.get(u.id, now)?.total || 0
+  const maxExp = q.maxPoolExpiresAt.get(u.id, now)?.max_exp || null
   return {
     id: u.id,
     username: u.username,
     platform_slug: u.platform_slug,
-    membership_expires_at: u.membership_expires_at,
-    downloads_remaining: u.downloads_remaining,
+    membership_expires_at: maxExp,
+    downloads_remaining: total,
   }
 }
 
 export function membershipActive(u) {
-  if (!u || u.membership_expires_at == null) return false
-  return u.membership_expires_at > dbNow()
+  if (!u) return false
+  const now = dbNow()
+  const row = q.sumActiveDownloads.get(u.id, now)
+  return (row?.total || 0) > 0
 }
 
 export function canCreateJob(u) {
-  return membershipActive(u) && u.downloads_remaining > 0
+  return membershipActive(u)
+}
+
+function activePools(userId) {
+  const now = dbNow()
+  q.cleanExpiredPools.run(now - 86400000)
+  return q.getActivePools.all(userId, now)
+}
+
+function syncUserCache(userId) {
+  const now = dbNow()
+  const total = q.sumActiveDownloads.get(userId, now)?.total || 0
+  const maxExp = q.maxPoolExpiresAt.get(userId, now)?.max_exp || null
+  db.prepare(
+    `UPDATE users SET downloads_remaining = ?, membership_expires_at = ? WHERE id = ?`
+  ).run(total, maxExp, userId)
 }
 
 export function consumeJobCredit(userId) {
-  const info = q.consumeDownload.run(userId)
-  return info.changes === 1
+  const now = dbNow()
+  const pools = q.getActivePools.all(userId, now)
+  if (pools.length === 0) return false
+
+  const pool = pools[0]
+  const info = q.consumeFromPool.run(pool.id)
+  if (info.changes !== 1) return false
+
+  syncUserCache(userId)
+  return true
 }
 
 export function refundJobCredit(userId) {
-  const info = q.refundDownload.run(userId)
-  return info.changes === 1
+  const pools = db.prepare(`
+    SELECT * FROM download_pools
+    WHERE user_id = ? AND remaining < downloads
+    ORDER BY expires_at DESC
+  `).all(userId)
+
+  if (pools.length === 0) return false
+
+  const pool = pools[0]
+  const info = q.refundToPool.run(pool.id)
+  if (info.changes !== 1) return false
+
+  syncUserCache(userId)
+  return true
 }
 
 export function redeemCardForUser(userId, rawCode) {
@@ -90,6 +130,9 @@ export function redeemCardForUser(userId, rawCode) {
   const u = q.userById.get(userId)
   if (!u) return { ok: false, error: 'no_user' }
 
+  const now = dbNow()
+  const expiresAt = now + row.days * 86400000
+
   const tx = db.transaction(() => {
     const r2 = q.cardByCode.get(code)
     if (!r2 || r2.uses >= r2.max_uses) throw new Error('race')
@@ -97,20 +140,7 @@ export function redeemCardForUser(userId, rawCode) {
     const updUses = q.redeemCard.run(r2.id)
     if (updUses.changes !== 1) throw new Error('race')
 
-    const u2 = q.userById.get(userId)
-    if (!u2) throw new Error('no_user')
-
-    const now = dbNow()
-    const base =
-      u2.membership_expires_at != null && u2.membership_expires_at > now
-        ? u2.membership_expires_at
-        : now
-    const newExp = base + r2.days * 86400000
-
-    db.prepare(
-      `UPDATE users SET membership_expires_at = ?, downloads_remaining = downloads_remaining + ? WHERE id = ?`
-    ).run(newExp, r2.downloads, userId)
-
+    q.insertDownloadPool.run(userId, r2.id, r2.downloads, r2.downloads, expiresAt, now)
     q.insertRedemption.run(userId, r2.id, r2.days, r2.downloads, now)
   })
 
@@ -119,6 +149,8 @@ export function redeemCardForUser(userId, rawCode) {
   } catch {
     return { ok: false, error: 'redeem_failed' }
   }
+
+  syncUserCache(userId)
 
   const fresh = q.userById.get(userId)
   return { ok: true, user: userPublic(fresh) }
@@ -157,17 +189,13 @@ export function registerUserWithCard({ username, password, platform_slug, rawCod
     const updUses = q.redeemCard.run(freshCard.id)
     if (updUses.changes !== 1) throw new Error('redeem_failed')
 
-    const base =
-      user.membership_expires_at != null && user.membership_expires_at > created_at
-        ? user.membership_expires_at
-        : created_at
-    const newExp = base + freshCard.days * 86400000
+    const expiresAt = created_at + freshCard.days * 86400000
+    q.insertDownloadPool.run(user.id, freshCard.id, freshCard.downloads, freshCard.downloads, expiresAt, created_at)
+    q.insertRedemption.run(user.id, freshCard.id, freshCard.days, freshCard.downloads, created_at)
 
     db.prepare(
-      `UPDATE users SET membership_expires_at = ?, downloads_remaining = downloads_remaining + ? WHERE id = ?`
-    ).run(newExp, freshCard.downloads, user.id)
-
-    q.insertRedemption.run(user.id, freshCard.id, freshCard.days, freshCard.downloads, created_at)
+      `UPDATE users SET downloads_remaining = ?, membership_expires_at = ? WHERE id = ?`
+    ).run(freshCard.downloads, expiresAt, user.id)
   })
 
   try {
