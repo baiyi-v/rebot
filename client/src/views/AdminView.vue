@@ -81,6 +81,15 @@
             maxlength="200"
           />
         </div>
+        <div class="form-group form-group--checkbox">
+          <label class="checkbox-label">
+            <input 
+              v-model="isEvent" 
+              type="checkbox"
+            />
+            <span>活动卡密（每个账号只能兑换一次）</span>
+          </label>
+        </div>
         <button @click="generateCards" :disabled="loading || !canGenerate">
           {{ loading ? '生成中...' : '生成卡密' }}
         </button>
@@ -100,6 +109,47 @@
         </div>
         <button type="button" @click="copyAll">复制全部</button>
       </div>
+
+      <div class="form-section">
+        <h3>分享文件管理</h3>
+        <div class="form-group">
+          <label>分享日期（留空加入候选池）</label>
+          <input v-model="shareDate" type="date" class="share-date-input" />
+          <span class="hint">不填日期则加入候选池，由系统每天自动分配</span>
+        </div>
+        <div class="form-group">
+          <label>分享文件名</label>
+          <input v-model="shareName" type="text" placeholder="例如：每日活动卡密-2026-05-23" />
+        </div>
+        <div class="form-group">
+          <label>分享链接</label>
+          <input v-model="shareLink" type="text" placeholder="迅雷分享链接" />
+        </div>
+        <div class="form-group">
+          <label>提取码（可选）</label>
+          <input v-model="shareExtractionCode" type="text" placeholder="如有提取码请填写" />
+        </div>
+        <p v-if="shareError" class="error">{{ shareError }}</p>
+        <button @click="createShare" :disabled="shareLoading">
+          {{ shareLoading ? '创建中...' : '创建/更新分享' }}
+        </button>
+      </div>
+
+      <div v-if="shareList.length > 0" class="result-section">
+        <h3>分享记录</h3>
+        <div class="share-list">
+          <div v-for="s in shareList" :key="s.id" class="share-item">
+            <div class="share-item__date">{{ s.share_date || '候选池' }}</div>
+            <div class="share-item__name">{{ s.name }}</div>
+            <div class="share-item__meta">
+              <span :class="s.status === 'active' ? 'share-status--active' : s.status === 'pending' ? 'share-status--pending' : 'share-status--inactive'">
+                {{ s.status === 'active' ? '使用中' : s.status === 'pending' ? '候选池' : '停用' }}
+              </span>
+              <span>下载 {{ s.download_count }} 次</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -113,8 +163,16 @@ const days = ref(30);
 const downloads = ref(10);
 const count = ref(5);
 const maxUses = ref(1);
+const isEvent = ref(false);
 const note = ref('');
 const generatedCodes = ref([]);
+const shareName = ref('');
+const shareLink = ref('');
+const shareExtractionCode = ref('');
+const shareDate = ref(new Date().toISOString().slice(0, 10));
+const shareError = ref('');
+const shareList = ref([]);
+const shareLoading = ref(false);
 const canGenerate = computed(() => {
  return (days.value > 0 || downloads.value > 0) && count.value > 0;
 });
@@ -135,7 +193,8 @@ async function authenticate() {
  });
  const data = await r.json();
  if (r.ok && data.ok) {
- authenticated.value = true;
+ authenticated.value = true
+ loadShares()
  }
  else {
  error.value = data.message || '密钥验证失败';
@@ -164,8 +223,9 @@ async function generateCards() {
  days: days.value,
  downloads: downloads.value,
  count: count.value,
- max_uses: maxUses.value,
- note: note.value
+        max_uses: maxUses.value,
+        is_event: isEvent.value,
+        note: note.value
  })
  });
  const data = await r.json();
@@ -237,9 +297,64 @@ async function copyAll() {
  }
 }
 function logout() {
- authenticated.value = false;
- adminSecret.value = '';
- generatedCodes.value = [];
+  authenticated.value = false
+  adminSecret.value = ''
+  generatedCodes.value = []
+  shareList.value = []
+}
+
+async function loadShares() {
+  shareError.value = ''
+  try {
+    const r = await fetch('/api/admin/shares', {
+      headers: { 'X-Admin-Secret': adminSecret.value },
+    })
+    const data = await r.json()
+    if (r.ok) {
+      shareList.value = data.shares || []
+    } else {
+      shareError.value = data.message || '加载失败'
+    }
+  } catch {
+    shareError.value = '连接服务器失败'
+  }
+}
+
+async function createShare() {
+  if (!shareName.value.trim() || !shareLink.value.trim()) {
+    shareError.value = '分享名和链接为必填项'
+    return
+  }
+  shareLoading.value = true
+  shareError.value = ''
+  try {
+    const r = await fetch('/api/admin/shares', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Secret': adminSecret.value,
+      },
+      body: JSON.stringify({
+        name: shareName.value.trim(),
+        link: shareLink.value.trim(),
+        extraction_code: shareExtractionCode.value.trim(),
+        share_date: shareDate.value.trim(),
+      }),
+    })
+    const data = await r.json()
+    if (r.ok) {
+      shareName.value = ''
+      shareExtractionCode.value = ''
+      shareDate.value = new Date().toISOString().slice(0, 10)
+      await loadShares()
+    } else {
+      shareError.value = data.message || '创建失败'
+    }
+  } catch {
+    shareError.value = '连接服务器失败'
+  } finally {
+    shareLoading.value = false
+  }
 }
 </script>
 
@@ -404,5 +519,76 @@ button:disabled {
 
 .summary strong {
   color: #333;
+}
+
+.form-group--checkbox {
+  padding: 5px 0;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  color: #555;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #4a90d9;
+}
+
+.share-date-input {
+  font-family: inherit;
+}
+
+.share-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.share-item {
+  padding: 12px 15px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.share-item__date {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.share-item__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.share-item__meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #666;
+}
+
+.share-status--active {
+  color: #27ae60;
+  font-weight: 600;
+}
+
+.share-status--pending {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.share-status--inactive {
+  color: #999;
 }
 </style>

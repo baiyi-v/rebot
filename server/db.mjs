@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS card_keys (
   downloads INTEGER NOT NULL,
   max_uses INTEGER NOT NULL DEFAULT 1,
   uses INTEGER NOT NULL DEFAULT 0,
+  is_event INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   note TEXT
 );
@@ -161,7 +162,41 @@ CREATE TABLE IF NOT EXISTS zhihu_searches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_zhihu_searches_account_created ON zhihu_searches(account, created_at);
+
+CREATE TABLE IF NOT EXISTS share_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  link TEXT NOT NULL,
+  extraction_code TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  share_date TEXT,
+  download_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_share_files_date ON share_files(share_date) WHERE share_date != '';
+
+CREATE TABLE IF NOT EXISTS share_downloads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  share_file_id INTEGER NOT NULL REFERENCES share_files(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  share_date TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_share_downloads_user_date ON share_downloads(user_id, share_date);
 `)
+
+const cardKeysColumns = db.prepare(`PRAGMA table_info(card_keys)`).all()
+if (!cardKeysColumns.some((c) => c.name === 'is_event')) {
+  db.exec(`ALTER TABLE card_keys ADD COLUMN is_event INTEGER NOT NULL DEFAULT 0`)
+}
+
+const shareIndexSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_share_files_date'`).get()
+if (shareIndexSql && !String(shareIndexSql.sql).includes('WHERE')) {
+  db.exec(`DROP INDEX idx_share_files_date`)
+  db.exec(`CREATE UNIQUE INDEX idx_share_files_date ON share_files(share_date) WHERE share_date != ''`)
+}
 
 const userJobColumns = db.prepare(`PRAGMA table_info(user_jobs)`).all()
 if (!userJobColumns.some((c) => c.name === 'book_id')) {
@@ -246,8 +281,8 @@ export const q = {
   `),
   cardByCode: db.prepare(`SELECT * FROM card_keys WHERE code = ?`),
   insertCard: db.prepare(`
-    INSERT INTO card_keys (code, days, downloads, max_uses, uses, created_at, note)
-    VALUES (@code, @days, @downloads, @max_uses, 0, @created_at, @note)
+    INSERT INTO card_keys (code, days, downloads, max_uses, is_event, uses, created_at, note)
+    VALUES (@code, @days, @downloads, @max_uses, @is_event, 0, @created_at, @note)
   `),
   redeemCard: db.prepare(`
     UPDATE card_keys SET uses = uses + 1 WHERE id = ? AND uses < max_uses
@@ -255,6 +290,16 @@ export const q = {
   insertRedemption: db.prepare(`
     INSERT INTO redemptions (user_id, card_id, days_added, downloads_added, created_at)
     VALUES (?, ?, ?, ?, ?)
+  `),
+  userCardRedemptionToday: db.prepare(`
+    SELECT 1 FROM redemptions
+    WHERE user_id = ? AND card_id = ? AND created_at > ?
+    LIMIT 1
+  `),
+  userRedeemedCard: db.prepare(`
+    SELECT 1 FROM redemptions
+    WHERE user_id = ? AND card_id = ?
+    LIMIT 1
   `),
   consumeDownload: db.prepare(`
     UPDATE users SET downloads_remaining = downloads_remaining - 1
@@ -412,6 +457,40 @@ export const q = {
   `),
   cleanExpiredPools: db.prepare(`
     DELETE FROM download_pools WHERE expires_at < ?
+  `),
+  insertShareFile: db.prepare(`
+    INSERT INTO share_files (name, link, extraction_code, status, share_date, download_count, created_at)
+    VALUES (@name, @link, @extraction_code, @status, @share_date, 0, @created_at)
+  `),
+  shareFileByDate: db.prepare(`
+    SELECT * FROM share_files WHERE share_date = ? LIMIT 1
+  `),
+  incrementShareDownloadCount: db.prepare(`
+    UPDATE share_files SET download_count = download_count + 1 WHERE id = ?
+  `),
+  insertShareDownload: db.prepare(`
+    INSERT INTO share_downloads (share_file_id, user_id, share_date, created_at)
+    VALUES (?, ?, ?, ?)
+  `),
+  userDownloadedShareToday: db.prepare(`
+    SELECT 1 FROM share_downloads WHERE user_id = ? AND share_date = ? LIMIT 1
+  `),
+  listShareFiles: db.prepare(`
+    SELECT * FROM share_files ORDER BY share_date DESC
+  `),
+  pendingShareFile: db.prepare(`
+    SELECT * FROM share_files WHERE share_date = '' ORDER BY id ASC LIMIT 1
+  `),
+  assignShareFile: db.prepare(`
+    UPDATE share_files SET share_date = ?, status = 'active' WHERE id = ?
+  `),
+  updateShareFile: db.prepare(`
+    UPDATE share_files
+    SET name = COALESCE(@name, name),
+        link = COALESCE(@link, link),
+        extraction_code = COALESCE(@extraction_code, extraction_code),
+        status = COALESCE(@status, status)
+    WHERE id = @id
   `),
 }
 

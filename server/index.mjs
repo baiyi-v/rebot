@@ -42,6 +42,7 @@ import { mountAuthRoutes, requireJobQuota, requireUser, authDisabled } from './a
 import { consumeJobCredit, refundJobCredit } from './auth-core.mjs'
 import { q, dbNow } from './db.mjs'
 import { mountRoutes as mountSotxt8 } from './platforms/sotxt8.mjs'
+import { startScheduledDailyQuarkAuth } from './platforms/sotxt8_quark_auth.mjs'
 import { mountRoutes as mountZhihu } from './platforms/zhihu.mjs'
 
 function parseArgs() {
@@ -1126,6 +1127,7 @@ async function startServer() {
     setInterval(() => {
       void syncActiveEngineJobs()
     }, ACTIVE_ENGINE_SYNC_MS).unref()
+    startScheduledDailyQuarkAuth()
     app.listen(PORT, host, () => {
       console.log(`[proxy] http://${host}:${PORT} -> ${TARGET}`)
       if (ENGINE_TARGETS.length > 1) {

@@ -72,6 +72,15 @@ const router = createRouter({
       name: 'admin',
       component: AdminView,
     },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      redirect: () => {
+        if (authBypass()) return '/platforms'
+        if (auth.token && auth.user) return '/platforms'
+        return '/login'
+      },
+    },
   ],
 })
 
@@ -83,12 +92,15 @@ router.beforeEach((to, _from, next) => {
     return next()
   }
 
-  if (to.meta.requiresAuth && !auth.token) {
-    return next({ path: '/login', query: { redirect: to.fullPath } })
+  if (to.path === '/admin') return next()
+
+  if (to.path === '/login') {
+    if (auth.token && auth.user) return next({ path: '/platforms', replace: true })
+    return next()
   }
 
-  if (to.meta.guestGate && auth.token && auth.user) {
-    return next({ path: '/platforms', replace: true })
+  if (!auth.token || !auth.user) {
+    return next({ path: '/login', query: { redirect: to.fullPath } })
   }
 
   next()

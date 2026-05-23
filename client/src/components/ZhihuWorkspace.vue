@@ -134,7 +134,7 @@ function onKeydown(e) {
         v-model="parseUrl"
         class="search-bar__input"
         type="text"
-        placeholder="粘贴知乎小说/专栏链接..."
+        placeholder="粘贴纸糊/盐言分享链接..."
         @keydown="onKeydown"
       />
       <button

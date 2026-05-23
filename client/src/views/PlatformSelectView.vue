@@ -1,11 +1,12 @@
 <script setup>
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '../auth.js'
 
 const router = useRouter()
 
 const activePlatforms = new Set(['tomato', 'txtsearch', 'zhihu'])
+const showLogoutConfirm = ref(false)
 
 const platformRoutes = {
   tomato: '/app/tomato',
@@ -18,9 +19,17 @@ onMounted(async () => {
   await auth.loadMe()
 })
 
-async function logout() {
+function logout() {
+  showLogoutConfirm.value = true
+}
+
+async function confirmLogout() {
   await auth.logout()
   await router.replace('/login')
+}
+
+function cancelLogout() {
+  showLogoutConfirm.value = false
 }
 
 function enterPlatform(slug) {
@@ -80,6 +89,19 @@ function isActive(slug) {
       </template>
     </div>
   </div>
+
+  <Teleport to="body">
+    <div v-if="showLogoutConfirm" class="confirm-overlay" @click.self="cancelLogout">
+      <div class="confirm-dialog">
+        <div class="confirm-dialog__title">确认退出</div>
+        <div class="confirm-dialog__hint">退出后需要重新登录才能使用</div>
+        <div class="confirm-dialog__actions">
+          <button class="btn" @click="cancelLogout">取消</button>
+          <button class="btn btn--danger" @click="confirmLogout">确认退出</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script>
@@ -237,5 +259,65 @@ export function activePlatformDesc(slug) {
 .plat-card__cta--muted {
   color: var(--text-dim);
   font-weight: 600;
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.confirm-dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 32px;
+  min-width: 360px;
+  max-width: 440px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.confirm-dialog__title {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.confirm-dialog__hint {
+  font-size: 12px;
+  color: #fbbf24;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(251, 191, 36, 0.1);
+  border-radius: 6px;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
+.confirm-dialog__actions .btn {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.btn--danger {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.btn--danger:hover {
+  background: rgba(239, 68, 68, 0.3);
+  color: #fecaca;
 }
 </style>

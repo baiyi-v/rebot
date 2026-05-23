@@ -10,7 +10,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
-import { performQuarkAuth, getQuarkAuthState } from './sotxt8_quark_auth.mjs'
+import { performQuarkAuth, getQuarkAuthState, resetQuarkAuthState } from './sotxt8_quark_auth.mjs'
 import { q, dbNow } from '../db.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -435,8 +435,8 @@ async function searchGuard(userId, keyword) {
         if (retryData?.success) {
           return retryData
         }
-        LOG('授权后仍无法通过搜索守卫')
-        throw new Error('数据处理异常请等待稍后访问')
+        LOG('授权后仍无法通过搜索守卫，重置状态重新授权')
+        resetQuarkAuthState()
       }
 
       if (state.status === 'in_progress') {

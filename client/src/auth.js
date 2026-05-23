@@ -161,6 +161,25 @@ export const auth = reactive({
     return data.pools || []
   },
 
+  async loadShareToday() {
+    const r = await fetch('/api/user/shares/today', {
+      headers: { Authorization: `Bearer ${this.token}` },
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`)
+    return data
+  },
+
+  async claimShareToday() {
+    const r = await fetch('/api/user/shares/today/claim', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}` },
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`)
+    return data
+  },
+
   membershipActive() {
     const u = this.user
     if (!u || u.membership_expires_at == null) return false

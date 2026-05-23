@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { q, dbNow } from './db.mjs'
+import { q, dbNow, db } from './db.mjs'
 import {
   hashPassword,
   verifyPassword,
@@ -31,9 +31,11 @@ export function bearerToken(req) {
   return ''
 }
 
+const ANON_USER = { id: 0, username: 'anonymous', platform_slug: 'tomato', membership_expires_at: null, downloads_remaining: 0 }
+
 export function attachUser(req, res, next) {
   if (authDisabled()) {
-    req.user = null
+    req.user = ANON_USER
     req.authToken = null
     return next()
   }
@@ -255,6 +257,7 @@ export function mountAuthRoutes(app) {
         empty_code: [400, '请输入卡密'],
         invalid_code: [404, '卡密无效'],
         code_used_up: [409, '卡密已用尽'],
+        event_redeemed: [409, '活动卡密每个账号只能兑换一次'],
         redeem_failed: [409, '充值失败，请重试'],
         no_user: [401, '请重新登录'],
       }
@@ -281,6 +284,7 @@ export function mountAuthRoutes(app) {
       downloads: row.downloads,
       max_uses: row.max_uses,
       uses: row.uses,
+      is_event: row.is_event,
     })
   })
 
@@ -302,6 +306,7 @@ export function mountAuthRoutes(app) {
     const downloads = Number(req.body?.downloads)
     const count = Math.min(100, Math.max(1, Number(req.body?.count) || 1))
     const max_uses = Math.min(1000, Math.max(1, Number(req.body?.max_uses) || 1))
+    const is_event = req.body?.is_event ? 1 : 0
     const note = String(req.body?.note || '').slice(0, 200)
 
     if (!Number.isFinite(days) || days < 0 || days > 36500) {
@@ -318,7 +323,7 @@ export function mountAuthRoutes(app) {
       for (let t = 0; t < 40 && !inserted; t++) {
         const code = randomCardCode()
         try {
-          q.insertCard.run({ code, days, downloads, max_uses, created_at, note })
+          q.insertCard.run({ code, days, downloads, max_uses, is_event, created_at, note })
           codes.push(code)
           inserted = true
         } catch {
@@ -329,6 +334,118 @@ export function mountAuthRoutes(app) {
         return res.status(500).json({ error: 'generate_failed', message: '生成卡密失败' })
       }
     }
-    res.json({ codes, days, downloads, max_uses, count: codes.length })
+    res.json({ codes, days, downloads, max_uses, is_event, count: codes.length })
+  })
+
+  app.post('/api/admin/shares', (req, res) => {
+    if (!verifyAdminSecret(req, res)) return
+    const name = String(req.body?.name || '').trim()
+    const link = String(req.body?.link || '').trim()
+    const extraction_code = String(req.body?.extraction_code || '').trim()
+    const share_date = String(req.body?.share_date || '').trim()
+
+    if (!name || !link) {
+      return res.status(400).json({ error: 'bad_request', message: '分享名和分享链接为必填项' })
+    }
+
+    const created_at = dbNow()
+    if (share_date) {
+      try {
+        q.insertShareFile.run({ name, link, extraction_code, status: 'active', share_date, created_at })
+      } catch {
+        return res.status(409).json({ error: 'exists', message: '该日期已存在分享文件' })
+      }
+      res.json({ ok: true, share: q.shareFileByDate.get(share_date) })
+    } else {
+      q.insertShareFile.run({ name, link, extraction_code, status: 'pending', share_date: '', created_at })
+      const id = db.prepare('SELECT last_insert_rowid()').get()
+      res.json({ ok: true, share: { id: id['last_insert_rowid()'], name, link, extraction_code, status: 'pending', share_date: '', download_count: 0 } })
+    }
+  })
+
+  app.put('/api/admin/shares/:share_date', (req, res) => {
+    if (!verifyAdminSecret(req, res)) return
+    const share_date = String(req.params.share_date || '').trim()
+    const existing = q.shareFileByDate.get(share_date)
+    if (!existing) {
+      return res.status(404).json({ error: 'not_found', message: '分享文件不存在' })
+    }
+    const name = req.body?.name != null ? String(req.body.name).trim() || null : null
+    const link = req.body?.link != null ? String(req.body.link).trim() || null : null
+    const extraction_code = req.body?.extraction_code != null ? String(req.body.extraction_code).trim() || null : null
+    const status = req.body?.status != null ? String(req.body.status).trim() || null : null
+    q.updateShareFile.run({ id: existing.id, name, link, extraction_code, status, share_date })
+    res.json({ ok: true, share: q.shareFileByDate.get(share_date) })
+  })
+
+  app.get('/api/admin/shares', (req, res) => {
+    if (!verifyAdminSecret(req, res)) return
+    const files = q.listShareFiles.all()
+    res.json({ shares: files })
+  })
+
+  app.get('/api/user/shares/today', requireUser, (req, res) => {
+    const today = new Date().toISOString().slice(0, 10)
+    const file = q.shareFileByDate.get(today)
+    if (!file || file.status !== 'active') {
+      return res.json({ share: null, claimed: false, message: '今日暂无活动卡密' })
+    }
+    const downloaded = !!q.userDownloadedShareToday.get(req.user.id, today)
+    res.json({
+      share: {
+        id: file.id,
+        name: file.name,
+        link: file.link,
+        extraction_code: file.extraction_code,
+        download_count: file.download_count,
+      },
+      claimed: downloaded,
+    })
+  })
+
+  app.post('/api/user/shares/today/claim', requireUser, (req, res) => {
+    const today = new Date().toISOString().slice(0, 10)
+
+    if (q.userDownloadedShareToday.get(req.user.id, today)) {
+      return res.status(409).json({ error: 'already_claimed', message: '今日已领取过活动卡密' })
+    }
+
+    let file = q.shareFileByDate.get(today)
+    if (!file) {
+      const pending = q.pendingShareFile.get()
+      if (!pending) {
+        return res.status(404).json({ error: 'no_share', message: '暂无可用活动卡密链接' })
+      }
+      q.assignShareFile.run(today, pending.id)
+      file = q.shareFileByDate.get(today)
+    }
+
+    if (!file || file.status !== 'active') {
+      return res.status(404).json({ error: 'no_share', message: '今日暂无活动卡密' })
+    }
+
+    const now = dbNow()
+
+    const tx = db.transaction(() => {
+      q.incrementShareDownloadCount.run(file.id)
+      q.insertShareDownload.run(file.id, req.user.id, today, now)
+    })
+
+    try {
+      tx()
+    } catch {
+      return res.status(500).json({ error: 'claim_failed', message: '领取失败，请重试' })
+    }
+
+    res.json({
+      ok: true,
+      share: {
+        id: file.id,
+        name: file.name,
+        link: file.link,
+        extraction_code: file.extraction_code,
+        download_count: file.download_count + 1,
+      },
+    })
   })
 }

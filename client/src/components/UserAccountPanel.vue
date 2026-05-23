@@ -10,6 +10,7 @@ const busy = ref('')
 const msg = ref('')
 const msgKind = ref('')
 const showConfirm = ref(false)
+const showLogoutConfirm = ref(false)
 const cardInfo = ref(null)
 
 function formatTimeShort(ts) {
@@ -26,7 +27,11 @@ const quotaLine = computed(() => {
   return `会员到期：${exp} · 剩余下载次数：${u.downloads_remaining ?? 0}`
 })
 
-async function onLogout() {
+function onLogout() {
+  showLogoutConfirm.value = true
+}
+
+async function confirmLogout() {
   busy.value = 'logout'
   try {
     await auth.logout()
@@ -34,6 +39,10 @@ async function onLogout() {
   } finally {
     busy.value = ''
   }
+}
+
+function cancelLogout() {
+  showLogoutConfirm.value = false
 }
 
 function onRedeemClick() {
@@ -137,6 +146,23 @@ function backPlatforms() {
               <span v-if="busy === 'redeem'" class="spinner"></span>
               <span v-if="busy === 'redeem'">充值中…</span>
               <span v-else>确认充值</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showLogoutConfirm" class="confirm-overlay" @click.self="cancelLogout">
+        <div class="confirm-dialog">
+          <div class="confirm-dialog__title">确认退出</div>
+          <div class="confirm-dialog__hint">退出后需要重新登录才能使用</div>
+          <div class="confirm-dialog__actions">
+            <button class="btn" @click="cancelLogout">取消</button>
+            <button class="btn btn--danger" :disabled="busy === 'logout'" @click="confirmLogout">
+              <span v-if="busy === 'logout'" class="spinner"></span>
+              <span v-if="busy === 'logout'">退出中…</span>
+              <span v-else>确认退出</span>
             </button>
           </div>
         </div>
@@ -314,5 +340,16 @@ function backPlatforms() {
   font-size: 14px;
   font-weight: 600;
   border-radius: 8px;
+}
+
+.btn--danger {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.btn--danger:hover {
+  background: rgba(239, 68, 68, 0.3);
+  color: #fecaca;
 }
 </style>

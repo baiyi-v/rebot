@@ -4,6 +4,13 @@ import { q, dbNow, db } from './db.mjs'
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000
 
+function calcExpiresAt(days, fromTs) {
+  const d = new Date(fromTs)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() + days)
+  return d.getTime()
+}
+
 export function hashPassword(password, saltBuf = crypto.randomBytes(16)) {
   const salt = saltBuf
   const hash = crypto.scryptSync(password, salt, 64, SCRYPT_PARAMS)
@@ -73,7 +80,7 @@ export function canCreateJob(u) {
 
 function activePools(userId) {
   const now = dbNow()
-  q.cleanExpiredPools.run(now - 86400000)
+  q.cleanExpiredPools.run(now)
   return q.getActivePools.all(userId, now)
 }
 
@@ -130,8 +137,12 @@ export function redeemCardForUser(userId, rawCode) {
   const u = q.userById.get(userId)
   if (!u) return { ok: false, error: 'no_user' }
 
+  if (row.is_event && q.userRedeemedCard.get(userId, row.id)) {
+    return { ok: false, error: 'event_redeemed' }
+  }
+
   const now = dbNow()
-  const expiresAt = now + row.days * 86400000
+  const expiresAt = calcExpiresAt(row.days, now)
 
   const tx = db.transaction(() => {
     const r2 = q.cardByCode.get(code)
@@ -189,7 +200,7 @@ export function registerUserWithCard({ username, password, platform_slug, rawCod
     const updUses = q.redeemCard.run(freshCard.id)
     if (updUses.changes !== 1) throw new Error('redeem_failed')
 
-    const expiresAt = created_at + freshCard.days * 86400000
+    const expiresAt = calcExpiresAt(freshCard.days, created_at)
     q.insertDownloadPool.run(user.id, freshCard.id, freshCard.downloads, freshCard.downloads, expiresAt, created_at)
     q.insertRedemption.run(user.id, freshCard.id, freshCard.days, freshCard.downloads, created_at)
 

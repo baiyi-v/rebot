@@ -95,6 +95,13 @@ export function getQuarkAuthState() {
   return { ...quarkAuthState }
 }
 
+export function resetQuarkAuthState() {
+  quarkAuthState.status = 'idle'
+  quarkAuthState.completedAt = 0
+  quarkAuthState.failedAt = 0
+  quarkAuthState.error = ''
+}
+
 // ---- 从 index.php HTML 提取夸克分享链接 ----
 export function extractQuarkLink(html) {
   const idPattern = /<a\s[^>]*?\bid\s*=\s*["']latestAuthLinkButton["'][^>]*>/i
@@ -316,7 +323,8 @@ async function downloadFromQuarkShare(page, shareUrl) {
     return { found: false, texts: Array.from(cells).map(c => c.textContent?.trim()) }
   }, todayStr)
 
-  if (fileRow.found) {
+  const fileIsToday = !!fileRow.found
+  if (fileIsToday) {
     LOG(`找到当天文件: ${fileRow.text}`)
   } else {
     const allDates = fileRow.texts || []
@@ -379,10 +387,8 @@ async function downloadFromQuarkShare(page, shareUrl) {
   if (newFiles.length > 0) {
     LOG(`下载完成，新文件: ${newFiles.join(', ')}`)
     const zipFile = newFiles.find((f) => f.toLowerCase().endsWith('.zip'))
-    if (zipFile) {
-      return path.join(QUARK_DOWNLOADS_DIR, zipFile)
-    }
-    return path.join(QUARK_DOWNLOADS_DIR, newFiles[0])
+    const zipPath = zipFile ? path.join(QUARK_DOWNLOADS_DIR, zipFile) : path.join(QUARK_DOWNLOADS_DIR, newFiles[0])
+    return { zipPath, fileIsToday }
   }
 
   LOG('未检测到新下载的文件，检查浏览器下载...')
@@ -393,7 +399,8 @@ async function downloadFromQuarkShare(page, shareUrl) {
   if (retryNew.length > 0) {
     LOG(`二次检测到新文件: ${retryNew.join(', ')}`)
     const zipFile = retryNew.find((f) => f.toLowerCase().endsWith('.zip'))
-    return zipFile ? path.join(QUARK_DOWNLOADS_DIR, zipFile) : path.join(QUARK_DOWNLOADS_DIR, retryNew[0])
+    const zipPath = zipFile ? path.join(QUARK_DOWNLOADS_DIR, zipFile) : path.join(QUARK_DOWNLOADS_DIR, retryNew[0])
+    return { zipPath, fileIsToday }
   }
 
   throw new Error('夸克网盘下载未检测到文件')
@@ -729,10 +736,10 @@ function acquireAuthLock() {
   return null
 }
 
-function releaseAuthLock() {
+function releaseAuthLock(result = null) {
   authInProgress = false
   if (authLock?._resolver) {
-    authLock._resolver()
+    authLock._resolver(result)
     authLock = null
   }
 }
@@ -744,14 +751,20 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
 
   const pendingLock = acquireAuthLock()
   if (pendingLock) {
+    if (options.skipIfLocked) {
+      LOG('已有授权流程在进行中，定时器跳过等待')
+      return { success: false, fileIsToday: false }
+    }
     LOG('已有授权流程在进行中，等待完成...')
-    await pendingLock
-    LOG('等待的授权流程已完成')
-    return true
+    const waitedResult = await pendingLock
+    LOG(`等待的授权流程已完成: success=${waitedResult?.success}, fileIsToday=${waitedResult?.fileIsToday}`)
+    return waitedResult || { success: false, fileIsToday: false }
   }
 
   quarkAuthState.status = 'in_progress'
   quarkAuthState.error = ''
+
+  let authResult = { success: false, fileIsToday: false }
 
   try {
     LOG('========== 开始夸克网盘自动授权流程 ==========')
@@ -820,6 +833,7 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
 
     let success = false
     let updatedSotxt8Cookies = null
+    let resultFileIsToday = false
 
     try {
       const savedCookies = await loadQuarkCookies()
@@ -828,11 +842,14 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
         LOG('已恢复夸克 cookies')
       }
 
-      const zipPath = await downloadFromQuarkShare(page, targetUrl)
+      const { zipPath, fileIsToday } = await downloadFromQuarkShare(page, targetUrl)
+      resultFileIsToday = fileIsToday
 
       if (!zipPath) {
         throw new Error('未能从夸克网盘下载到文件')
       }
+
+      LOG(`下载文件路径: ${zipPath}`)
 
       const newCookies = await page.cookies()
       await saveQuarkCookies(newCookies)
@@ -840,17 +857,26 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
       const authCode = await extractAuthCodeFromZip(zipPath)
 
       if (!authCode) {
-        throw new Error('未能从下载文件中提取到授权口令')
+        const envCode = (process.env.QUARK_AUTH_CODE || '').trim()
+        if (envCode) {
+          LOG(`从 zip 提取口令失败，使用 .env 中配置的口令: ${envCode}`)
+        } else {
+          throw new Error('未能从下载文件中提取到授权口令,且未配置 QUARK_AUTH_CODE')
+        }
       }
 
-      const authResult = await applyAuthCode(sotxt8Cookies, sotxt8CsrfToken, authCode, html)
+      const finalCode = authCode || (process.env.QUARK_AUTH_CODE || '').trim()
+      LOG(`授权口令: ${finalCode}`)
+
+      const authResult = await applyAuthCode(sotxt8Cookies, sotxt8CsrfToken, finalCode, html)
       updatedSotxt8Cookies = authResult.cookies
 
       LOG('========== 夸克网盘自动授权流程完成 ==========')
       success = true
       quarkAuthState.status = 'completed'
       quarkAuthState.completedAt = Date.now()
-      return true
+      authResult = { success: true, fileIsToday: resultFileIsToday }
+      return authResult
     } catch (innerErr) {
       LOG(`自动授权步骤失败: ${innerErr.message}`)
       LOG('浏览器保持打开 60 秒，可手动完成操作...')
@@ -867,9 +893,10 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
     quarkAuthState.status = 'failed'
     quarkAuthState.failedAt = Date.now()
     quarkAuthState.error = e.message
-    return false
+    authResult = { success: false, fileIsToday: false }
+    return authResult
   } finally {
-    releaseAuthLock()
+    releaseAuthLock(authResult)
     if (onComplete) {
       try {
         await onComplete(quarkAuthState.status === 'completed', updatedSotxt8Cookies)
@@ -878,6 +905,102 @@ export async function performQuarkAuth(userId, htmlProvider, options = {}) {
       }
     }
   }
+}
+
+const SCHEDULED_RETRY_INTERVAL_MS = 60000
+const SCHEDULED_TARGET_HOUR = 0
+const SCHEDULED_TARGET_MIN_END = 10
+let scheduledTimer = null
+
+function isInDailyWindow() {
+  const now = new Date()
+  const h = now.getHours()
+  const m = now.getMinutes()
+  return h === SCHEDULED_TARGET_HOUR && m <= SCHEDULED_TARGET_MIN_END
+}
+
+async function runDailyAuthLoop() {
+  LOG('=== 每日定时授权: 进入窗口，开始授权循环 ===')
+  let attempt = 0
+
+  while (isInDailyWindow()) {
+    attempt++
+    LOG(`每日定时授权: 第 ${attempt} 次尝试`)
+
+    try {
+      const fetchResp = await fetch(`${BASE}/index.php`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(30000),
+      })
+
+      let sotxt8Cookies = ''
+      const setCookie = fetchResp.headers.getSetCookie?.()
+      if (setCookie) {
+        sotxt8Cookies = setCookie
+          .map((s) => s.split(';')[0])
+          .filter(Boolean)
+          .join('; ')
+      }
+      LOG(`每日定时授权: fetched cookies: ${sotxt8Cookies.slice(0, 60)}...`)
+
+      const html = await fetchResp.text()
+      const csrfM = html.match(/(?:csrf_token|csrfToken)\s*[:=]\s*["']([a-f0-9]{32})["']/i)
+        || html.match(/name=["']csrf_token["']\s+value=["']([a-f0-9]{32})["']/i)
+      const csrfToken = csrfM ? csrfM[1] : ''
+
+      const result = await performQuarkAuth('scheduler', html, {
+        sotxt8Cookies,
+        sotxt8CsrfToken: csrfToken,
+        skipIfLocked: true,
+      })
+
+      if (result.success && result.fileIsToday) {
+        LOG('=== 每日定时授权: 成功! 文件日期为当天，解除限制 ===')
+        return
+      }
+
+      if (result.success) {
+        LOG(`每日定时授权: 授权成功但文件不是当天的 (fileIsToday=${result.fileIsToday})，${SCHEDULED_RETRY_INTERVAL_MS / 1000}秒后重试`)
+      } else {
+        LOG(`每日定时授权: 授权失败 (success=${result.success})，${SCHEDULED_RETRY_INTERVAL_MS / 1000}秒后重试`)
+      }
+    } catch (e) {
+      LOG(`每日定时授权: 尝试异常: ${e.message}，${SCHEDULED_RETRY_INTERVAL_MS / 1000}秒后重试`)
+    }
+
+    await new Promise((r) => setTimeout(r, SCHEDULED_RETRY_INTERVAL_MS))
+  }
+
+  LOG(`每日定时授权: 已退出 00:00-00:${SCHEDULED_TARGET_MIN_END} 窗口，停止重试`)
+}
+
+function scheduleNextDaily() {
+  const now = new Date()
+  const next = new Date(now)
+  next.setDate(next.getDate() + 1)
+  next.setHours(SCHEDULED_TARGET_HOUR, 0, 0, 0)
+
+  const delayMs = next.getTime() - now.getTime()
+  const delaySec = Math.round(delayMs / 1000)
+  LOG(`每日定时授权: 下次触发时间 ${next.toLocaleString()} (${delaySec}秒后)`)
+
+  scheduledTimer = setTimeout(async () => {
+    await runDailyAuthLoop()
+    scheduleNextDaily()
+  }, delayMs).unref()
+}
+
+export function startScheduledDailyQuarkAuth() {
+  if (scheduledTimer) {
+    LOG('每日定时授权: 调度器已在运行，跳过')
+    return
+  }
+  LOG('每日定时授权: 调度器已启动，每日 00:00~00:10 触发')
+  scheduleNextDaily()
 }
 
 export { extractAuthCodeFromZip as extractCode }

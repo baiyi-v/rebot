@@ -10,9 +10,16 @@ const busy = ref('')
 const msg = ref('')
 const msgKind = ref('')
 const showConfirm = ref(false)
+const showLogoutConfirm = ref(false)
 const cardInfo = ref(null)
 const cardInfoLoading = ref(false)
 const pools = ref([])
+const shareToday = ref(null)
+const shareClaimed = ref(false)
+const shareLoading = ref(false)
+const shareMsg = ref('')
+const shareMsgKind = ref('')
+const shareExpanded = ref(false)
 
 function formatDate(ts) {
   return new Date(ts).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -28,7 +35,20 @@ const quotaLine = computed(() => {
   return `会员到期：${exp} · 剩余下载次数：${u.downloads_remaining ?? 0}`
 })
 
+const shareFullLink = computed(() => {
+  const s = shareToday.value
+  if (!s) return ''
+  const link = s.link.replace(/#+$/, '')
+  const code = s.extraction_code
+  return code ? link + '?pwd=' + code : link
+})
+
 async function onLogout() {
+  showLogoutConfirm.value = true
+}
+
+async function confirmLogout() {
+  showLogoutConfirm.value = false
   busy.value = 'logout'
   try {
     await auth.logout()
@@ -36,6 +56,10 @@ async function onLogout() {
   } finally {
     busy.value = ''
   }
+}
+
+function cancelLogout() {
+  showLogoutConfirm.value = false
 }
 
 async function onRedeemClick() {
@@ -53,6 +77,7 @@ async function onRedeemClick() {
       code,
       days: info.days,
       downloads: info.downloads,
+      is_event: info.is_event,
     }
     showConfirm.value = true
   } catch (e) {
@@ -104,8 +129,85 @@ function backToPlatform() {
   router.push(back || '/app/tomato')
 }
 
+async function loadShareToday() {
+  try {
+    const data = await auth.loadShareToday()
+    shareToday.value = data.share || null
+    shareClaimed.value = data.claimed || false
+  } catch {
+    shareToday.value = null
+    shareClaimed.value = false
+  }
+}
+
+async function expandShare() {
+  if (shareToday.value) {
+    shareExpanded.value = true
+    return
+  }
+  shareLoading.value = true
+  try {
+    const result = await auth.claimShareToday()
+    shareClaimed.value = true
+    shareToday.value = result.share || null
+    shareExpanded.value = true
+  } catch (e) {
+    shareMsgKind.value = 'err'
+    shareMsg.value = e.message || '暂无可用活动卡密'
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+async function onClaimShare() {
+  shareMsg.value = ''
+  shareMsgKind.value = ''
+  shareLoading.value = true
+  try {
+    const link = shareToday.value.link.replace(/#+$/, '')
+    const code = shareToday.value.extraction_code
+    const text = code ? link + '?pwd=' + code : link
+
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      /* clipboard not available */
+    }
+
+    const result = await auth.claimShareToday()
+    shareClaimed.value = true
+    shareToday.value = result.share || null
+    shareMsgKind.value = 'ok'
+    shareMsg.value = code ? '链接和提取码已复制到剪贴板' : '链接已复制到剪贴板'
+  } catch (e) {
+    shareMsgKind.value = 'err'
+    shareMsg.value = e.message || '领取失败，请重试'
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+async function onCopyShare() {
+  const text = shareFullLink.value
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  shareMsgKind.value = 'ok'
+  shareMsg.value = '链接已复制到剪贴板'
+}
+
 onMounted(() => {
   loadPools()
+  loadShareToday()
 })
 </script>
 
@@ -191,6 +293,52 @@ onMounted(() => {
         </div>
 
         <div class="account-page__section">
+          <h3 class="account-page__section-title">🎁 今日活动卡密</h3>
+          <div v-if="!shareExpanded" class="account-page__share-collapsed">
+            <button
+              type="button"
+              class="btn btn--primary account-page__share-btn"
+              @click="expandShare"
+            >
+              获取今日活动卡密
+            </button>
+          </div>
+          <div v-else class="account-page__share-card">
+            <div class="account-page__share-row">
+              <span class="account-page__share-label">文件</span>
+              <span class="account-page__share-value">{{ shareToday.name }}</span>
+            </div>
+            <div class="account-page__share-row">
+              <span class="account-page__share-label">链接</span>
+              <a :href="shareFullLink" target="_blank" class="account-page__share-link">
+                {{ shareFullLink }}
+              </a>
+            </div>
+            <div class="account-page__share-claim">
+              <button
+                v-if="!shareClaimed"
+                type="button"
+                class="btn btn--primary account-page__share-btn"
+                :disabled="shareLoading"
+                @click="onClaimShare"
+              >
+                <span v-if="shareLoading" class="spinner"></span>
+                {{ shareLoading ? '领取中…' : '复制并领取' }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="btn btn--secondary account-page__share-btn"
+                @click="onCopyShare"
+              >
+                复制链接
+              </button>
+            </div>
+            <p v-if="shareMsg" class="account-page__msg" :class="'account-page__msg--' + shareMsgKind">{{ shareMsg }}</p>
+          </div>
+        </div>
+
+        <div class="account-page__section">
           <h3 class="account-page__section-title">使用帮助</h3>
           <button type="button" class="btn btn--secondary" @click="router.push('/tutorial')">
             查看使用教程
@@ -230,6 +378,9 @@ onMounted(() => {
             <span class="confirm-dialog__info-value">{{ formatDate(Date.now() + (cardInfo?.days ?? 0) * 86400000) }}</span>
           </div>
         </div>
+        <div class="confirm-dialog__hint" v-if="cardInfo?.is_event">
+          <span class="confirm-dialog__event-badge">🎁 活动卡密 · 每个账号只能兑换一次</span>
+        </div>
         <div class="confirm-dialog__hint">下载消耗时优先使用即将过期的次数</div>
         <div class="confirm-dialog__actions">
           <button class="btn" @click="cancelRedeem">取消</button>
@@ -237,6 +388,23 @@ onMounted(() => {
             <span v-if="busy === 'redeem'" class="spinner"></span>
             <span v-if="busy === 'redeem'">充值中…</span>
             <span v-else>确认充值</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="showLogoutConfirm" class="confirm-overlay" @click.self="cancelLogout">
+      <div class="confirm-dialog">
+        <div class="confirm-dialog__title">确认退出</div>
+        <div class="confirm-dialog__hint">退出后需要重新登录才能使用</div>
+        <div class="confirm-dialog__actions">
+          <button class="btn" @click="cancelLogout">取消</button>
+          <button class="btn btn--danger" :disabled="busy === 'logout'" @click="confirmLogout">
+            <span v-if="busy === 'logout'" class="spinner"></span>
+            <span v-if="busy === 'logout'">退出中…</span>
+            <span v-else>确认退出</span>
           </button>
         </div>
       </div>
@@ -522,6 +690,14 @@ onMounted(() => {
   border-radius: 6px;
 }
 
+.confirm-dialog__event-badge {
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.12);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
 .confirm-dialog__actions {
   display: flex;
   gap: 10px;
@@ -534,5 +710,124 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 600;
   border-radius: 8px;
+}
+
+.account-page__share-collapsed {
+  text-align: center;
+  padding: 8px 0;
+}
+
+.account-page__share-card {
+  background: var(--bg-row);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.account-page__share-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.account-page__share-label {
+  font-size: 13px;
+  color: var(--text-dim);
+  min-width: 56px;
+  flex-shrink: 0;
+}
+
+.account-page__share-value {
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.account-page__share-link {
+  font-size: 12px;
+  color: #60a5fa;
+  word-break: break-all;
+  text-decoration: underline;
+}
+
+.account-page__share-link:hover {
+  color: #93c5fd;
+}
+
+.account-page__share-code {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fbbf24;
+  font-family: ui-monospace, monospace;
+}
+
+.account-page__share-count {
+  font-size: 14px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.account-page__share-claim {
+  margin-top: 14px;
+  text-align: center;
+}
+
+.account-page__share-btn {
+  width: 100%;
+}
+
+@media (max-width: 480px) {
+  .account-page {
+    padding: 12px 10px 32px;
+  }
+
+  .account-page__header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .account-page__title {
+    font-size: 18px;
+  }
+
+  .account-page__panel {
+    padding: 14px 10px;
+  }
+
+  .account-page__username {
+    font-size: 16px;
+  }
+
+  .account-page__stats {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .account-page__stat-item {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .account-page__redeem {
+    flex-direction: column;
+  }
+
+  .account-page__redeem-btn {
+    width: 100%;
+  }
+
+  .account-page__share-link {
+    font-size: 11px;
+  }
+
+  .account-page__actions {
+    flex-direction: column;
+  }
+
+  .confirm-dialog {
+    min-width: auto;
+    max-width: 92vw;
+    padding: 20px 16px;
+  }
 }
 </style>
